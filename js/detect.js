@@ -1,22 +1,48 @@
-/* global cv */
 // Direct port of xwordscan.py steps 1–5 (preprocess → deskew → crop →
 // size estimation → cell classification). OCR (step 6) is intentionally
 // omitted; the solver only needs the grid structure.
 
-// The opencv-js 5.x browser build exposes `cv` as a Promise that resolves
-// once the WASM runtime has initialized. Await it once up front.
+// opencv.js is ~13 MB, so it is fetched with a progress callback and injected
+// as a blob script. The 5.x browser build then exposes `cv` as a Promise that
+// resolves once the WASM runtime has initialized.
 let cvReadyPromise = null;
-function whenCvReady() {
+
+function whenCvReady(onProgress) {
   if (!cvReadyPromise) {
-    cvReadyPromise = Promise.resolve(cv).then((api) => {
-      if (!api.Mat) {
-        // Fallback for builds exposing onRuntimeInitialized instead
-        return new Promise((resolve) => { api.onRuntimeInitialized = () => resolve(api); });
-      }
-      return api;
+    cvReadyPromise = loadOpenCvScript(onProgress).then(() => {
+      const mod = globalThis.cv;
+      if (mod instanceof Promise) return mod;
+      if (mod.Mat) return mod;
+      // Fallback for builds exposing onRuntimeInitialized instead
+      return new Promise((resolve) => { mod.onRuntimeInitialized = () => resolve(mod); });
     });
   }
   return cvReadyPromise;
+}
+
+function loadOpenCvScript(onProgress) {
+  return fetch('lib/opencv.js').then(async (res) => {
+    if (!res.ok) throw new Error(`Failed to download OpenCV (HTTP ${res.status})`);
+    const total = Number(res.headers.get('Content-Length')) || 13300000;
+    const chunks = [];
+    let received = 0;
+    const reader = res.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      if (onProgress) onProgress(received / total);
+    }
+    const blob = new Blob(chunks, { type: 'text/javascript' });
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = URL.createObjectURL(blob);
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Failed to execute OpenCV'));
+      document.head.appendChild(s);
+    });
+  });
 }
 
 async function detectGrid(imgElement) {

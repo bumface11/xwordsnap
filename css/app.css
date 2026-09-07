@@ -96,3 +96,24 @@ button:active, #openBtn:active { background: #2457bd; }
   font-size: 0.95rem;
   min-height: 1.2em;
 }
+
+#cvProgressWrap {
+  height: 6px;
+  background: #2a2a2a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+#cvProgressWrap[hidden] { display: none; }
+
+#cvProgressBar {
+  height: 100%;
+  width: 0;
+  background: #2f6fed;
+  transition: width 0.15s ease-out;
+}
+
+.build-note {
+  margin: 0;
+  color: #555;
+  font-size: 0.78rem;
+}

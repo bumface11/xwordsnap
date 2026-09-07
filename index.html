@@ -8,7 +8,6 @@
   <meta name="theme-color" content="#111111">
   <link rel="stylesheet" href="css/app.css">
   <script src="lib/jscrossword_combined.js"></script>
-  <script src="lib/opencv.js" async></script>
 </head>
 <body>
   <main id="app">
@@ -35,6 +34,8 @@
     </section>
 
     <p id="status" role="status">Loading OpenCV…</p>
+    <div id="cvProgressWrap"><div id="cvProgressBar"></div></div>
+    <p id="buildNote" class="build-note"></p>
   </main>
   <script src="js/detect.js"></script>
   <script src="js/puzzle.js"></script>

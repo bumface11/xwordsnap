@@ -1,15 +1,29 @@
 /* global detectGrid, buildPuzzle, shareUrlFor, whenCvReady */
+const APP_BUILD = 'v3 · 2026-09-07';
 let detection = null;
 
-// Show "Ready." once the OpenCV WASM runtime has finished initializing
-whenCvReady().then(() => {
-  document.getElementById('status').textContent = 'Ready.';
+document.getElementById('buildNote').textContent = `build ${APP_BUILD}`;
+
+const status = document.getElementById('status');
+const progressBar = document.getElementById('cvProgressBar');
+const progressWrap = document.getElementById('cvProgressWrap');
+
+whenCvReady((fraction) => {
+  const pct = Math.min(100, Math.round(fraction * 100));
+  progressBar.style.width = pct + '%';
+  status.textContent = pct < 100
+    ? `Downloading OpenCV… ${pct}%`
+    : 'Initializing OpenCV runtime…';
+}).then(() => {
+  status.textContent = 'Ready.';
+  progressWrap.hidden = true;
+}).catch((err) => {
+  status.textContent = '⚠️ ' + err.message;
 });
 
 document.getElementById('camera').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  const status = document.getElementById('status');
   status.textContent = 'Detecting grid…';
   const img = document.getElementById('photo');
   img.src = URL.createObjectURL(file);

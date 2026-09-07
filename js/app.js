@@ -1,8 +1,9 @@
 /* global detectGrid, buildPuzzle, shareUrlFor, whenCvReady */
-const APP_BUILD = 'v6 · 2026-09-07';
+const APP_BUILD = 'v8 · 2026-09-07';
 
 let detection = null;
 let photoCanvas = null;   // downscaled source image
+let cropCanvasEl = null;  // the cropped image that detection ran on
 let cropRect = null;      // {x, y, w, h} in photoCanvas pixels; null = whole image
 let dragStart = null;
 
@@ -174,31 +175,50 @@ $('detectBtn').addEventListener('click', () => {
   sub.width = rect.w;
   sub.height = rect.h;
   sub.getContext('2d').drawImage(photoCanvas, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
+  cropCanvasEl = sub;
   runDetection(sub);
 });
 
 $('fullBtn').addEventListener('click', () => {
   cropRect = null;
   drawCrop();
+  cropCanvasEl = photoCanvas;
   runDetection(photoCanvas);
 });
 
 // --- Step 3: review / fix / share ---
+// The tap-to-toggle grid is drawn semi-transparently over the binarized
+// image the detector saw, so mismatches with the source are visible.
 function renderReview() {
-  const { rows, cols, blackCells } = detection;
+  const { rows, cols, blackCells, debugCanvas } = detection;
   $('dims').textContent = `${rows} × ${cols} grid`;
-  const preview = $('gridPreview');
-  preview.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-  preview.innerHTML = '';
+  const wrap = $('gridOverlay');
+  wrap.innerHTML = '';
+
+  const bg = document.createElement('canvas');
+  bg.className = 'overlay-bg';
+  // Prefer the processed (deskewed, cropped) image the classifier used;
+  // fall back to the raw crop.
+  const source = debugCanvas || cropCanvasEl;
+  bg.width = source.width;
+  bg.height = source.height;
+  bg.getContext('2d').drawImage(source, 0, 0);
+  wrap.appendChild(bg);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay-grid';
+  overlay.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  overlay.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     const cell = document.createElement('button');
-    cell.className = 'cell' + (blackCells[r][c] ? ' block' : '');
+    cell.className = 'overlay-cell' + (blackCells[r][c] ? ' block' : '');
     cell.onclick = () => {
       blackCells[r][c] = !blackCells[r][c];
       cell.classList.toggle('block');
     };
-    preview.appendChild(cell);
+    overlay.appendChild(cell);
   }
+  wrap.appendChild(overlay);
 }
 
 $('shareBtn').addEventListener('click', () => {

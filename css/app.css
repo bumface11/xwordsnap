@@ -66,23 +66,32 @@ button.secondary, .secondary {
 }
 button.secondary:active { background: #444; }
 
-#gridPreview {
-  display: grid;
-  gap: 1px;
-  background: #555;
-  border: 1px solid #555;
-  aspect-ratio: 1;
+#gridOverlay {
+  position: relative;
+  width: 100%;
 }
 
-.cell {
+.overlay-bg {
+  display: block;
+  width: 100%;
+  border-radius: 8px;
+}
+
+.overlay-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+}
+
+.overlay-cell {
   appearance: none;
-  border: 0;
+  border: 1px solid rgba(47, 111, 237, 0.25);
   margin: 0;
   padding: 0;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.18);
   cursor: pointer;
 }
-.cell.block { background: #111; }
+.overlay-cell.block { background: rgba(0, 0, 0, 0.75); }
 
 #title, #shareLink {
   width: 100%;

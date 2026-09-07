@@ -142,8 +142,8 @@ async function detectGrid(imgElement) {
   // TL = min(x+y), BR = max(x+y), TR = max(y-x), BL = min(y-x).
   const sums = quad.map(p => p[0] + p[1]);
   const difs = quad.map(p => p[1] - p[0]);
-  const ordered = [quad[idxOf(sums, false)], quad[idxOf(difs, true)],
-                   quad[idxOf(sums, true)], quad[idxOf(difs, false)]];
+  const ordered = [quad[idxOf(sums, false)], quad[idxOf(difs, false)],
+                  quad[idxOf(sums, true)], quad[idxOf(difs, true)]];
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
   const warpW = Math.max(2, Math.round(Math.max(dist(ordered[0], ordered[1]), dist(ordered[3], ordered[2]))));
   const warpH = Math.max(2, Math.round(Math.max(dist(ordered[0], ordered[3]), dist(ordered[1], ordered[2]))));

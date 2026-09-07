@@ -1,0 +1,15 @@
+{
+  "name": "xwordsnap",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PWA that scans a crossword grid from a photo and generates a shareable solver link",
+  "scripts": {
+    "postinstall": "node scripts/vendor.js",
+    "vendor": "node scripts/vendor.js",
+    "start": "node scripts/serve.js"
+  },
+  "dependencies": {
+    "@techstark/opencv-js": "5.0.0-release.1",
+    "html5-crossword-solver": "github:bumface11/html5-crossword-solver#ca6671451f452b9b069eee46da3eab851a03de7d"
+  }
+}

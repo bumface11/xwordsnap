@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>xwordsnap</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#111111">
+  <link rel="stylesheet" href="css/app.css">
+  <script src="lib/jscrossword_combined.js"></script>
+  <script src="lib/opencv.js" async onload="cvReady()"></script>
+</head>
+<body>
+  <main id="app">
+    <h1>Scan a Crossword</h1>
+
+    <label class="scan-btn">
+      📷 Take a photo of the grid
+      <input id="camera" type="file" accept="image/*" capture="environment" hidden>
+    </label>
+
+    <img id="photo" hidden>
+
+    <section id="review" hidden>
+      <h2 id="dims"></h2>
+      <div id="gridPreview"></div>   <!-- tap a cell to toggle black/white -->
+      <input id="title" placeholder="Puzzle title (optional)">
+      <button id="shareBtn">Generate solver link</button>
+    </section>
+
+    <section id="result" hidden>
+      <input id="shareLink" readonly>
+      <button id="copyBtn">Copy</button>
+      <a id="openBtn" target="_blank" rel="noopener">Open in solver</a>
+    </section>
+
+    <p id="status" role="status">Loading OpenCV…</p>
+  </main>
+  <script src="js/detect.js"></script>
+  <script src="js/puzzle.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

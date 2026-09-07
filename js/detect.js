@@ -3,7 +3,24 @@
 // size estimation → cell classification). OCR (step 6) is intentionally
 // omitted; the solver only needs the grid structure.
 
-function detectGrid(imgElement) {
+// The opencv-js 5.x browser build exposes `cv` as a Promise that resolves
+// once the WASM runtime has initialized. Await it once up front.
+let cvReadyPromise = null;
+function whenCvReady() {
+  if (!cvReadyPromise) {
+    cvReadyPromise = Promise.resolve(cv).then((api) => {
+      if (!api.Mat) {
+        // Fallback for builds exposing onRuntimeInitialized instead
+        return new Promise((resolve) => { api.onRuntimeInitialized = () => resolve(api); });
+      }
+      return api;
+    });
+  }
+  return cvReadyPromise;
+}
+
+async function detectGrid(imgElement) {
+  const cv = await whenCvReady();
   const src = cv.imread(imgElement);
   const gray = new cv.Mat();
   const binary = new cv.Mat();

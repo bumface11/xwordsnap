@@ -1,7 +1,10 @@
-/* global detectGrid, buildPuzzle, shareUrlFor */
+/* global detectGrid, buildPuzzle, shareUrlFor, whenCvReady */
 let detection = null;
 
-function cvReady() { document.getElementById('status').textContent = 'Ready.'; }
+// Show "Ready." once the OpenCV WASM runtime has finished initializing
+whenCvReady().then(() => {
+  document.getElementById('status').textContent = 'Ready.';
+});
 
 document.getElementById('camera').addEventListener('change', async (e) => {
   const file = e.target.files[0];
@@ -20,7 +23,7 @@ document.getElementById('camera').addEventListener('change', async (e) => {
   canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
 
   try {
-    detection = detectGrid(canvas);   // js/detect.js
+    detection = await detectGrid(canvas);   // js/detect.js
     renderReview();
     document.getElementById('review').hidden = false;
     document.getElementById('result').hidden = true;

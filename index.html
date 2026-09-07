@@ -18,7 +18,18 @@
       <input id="camera" type="file" accept="image/*" capture="environment" hidden>
     </label>
 
+    <button id="sampleBtn" class="secondary">🧪 Test with a sample grid</button>
+
     <img id="photo" hidden>
+
+    <section id="crop" hidden>
+      <h2>Crop to the grid</h2>
+      <canvas id="cropCanvas"></canvas>
+      <div class="btn-row">
+        <button id="detectBtn">Detect grid in selection</button>
+        <button id="fullBtn" class="secondary">Use whole image</button>
+      </div>
+    </section>
 
     <section id="review" hidden>
       <h2 id="dims"></h2>

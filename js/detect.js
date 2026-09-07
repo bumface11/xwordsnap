@@ -49,13 +49,14 @@ async function detectGrid(imgElement) {
   const cv = await whenCvReady();
   const src = cv.imread(imgElement);
   const gray = new cv.Mat();
+  const filtered = new cv.Mat();   // bilateralFilter can't run in-place (throws in the 5.0 WASM build)
   const binary = new cv.Mat();
 
   // --- Step 1: preprocess (xwordscan.preprocess) ---
   cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-  cv.bilateralFilter(gray, gray, 9, 75, 75);
-  cv.normalize(gray, gray, 0, 255, cv.NORM_MINMAX);
-  cv.adaptiveThreshold(gray, binary, 255,
+  cv.bilateralFilter(gray, filtered, 9, 75, 75);
+  cv.normalize(filtered, filtered, 0, 255, cv.NORM_MINMAX);
+  cv.adaptiveThreshold(filtered, binary, 255,
     cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 15, 10);
   const kernel = cv.Mat.ones(3, 3, cv.CV_8U);
   cv.morphologyEx(binary, binary, cv.MORPH_CLOSE, kernel);
@@ -74,12 +75,18 @@ async function detectGrid(imgElement) {
   }
   if (!best) throw new Error('No grid found — get closer and fill the frame.');
 
-  const grayGrid = gray.roi(best);
+  const grayGrid = filtered.roi(best);
   const binaryGrid = binary.roi(best);
 
   // --- Step 4: estimate rows × cols (xwordscan.detect_grid_size) ---
   const rows = countLines(binaryGrid, 'horizontal') - 1;
   const cols = countLines(binaryGrid, 'vertical') - 1;
+  if (rows < 2 || cols < 2) {
+    [src, gray, filtered, binary, kernel, contours, hierarchy, grayGrid, binaryGrid]
+      .forEach(m => m.delete());
+    throw new Error(
+      `Could not measure grid lines (saw ${rows}×${cols}) — crop tightly to the grid's outer border.`);
+  }
 
   // --- Step 5: classify cells (xwordscan.is_black_cell) ---
   const cellH = Math.floor(grayGrid.rows / rows);
@@ -100,7 +107,7 @@ async function detectGrid(imgElement) {
     blackCells.push(row);
   }
 
-  [src, gray, binary, kernel, contours, hierarchy, grayGrid, binaryGrid]
+  [src, gray, filtered, binary, kernel, contours, hierarchy, grayGrid, binaryGrid]
     .forEach(m => m.delete());
   return { rows, cols, blackCells };
 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'xwordsnap-v15'; // bump on every deploy (same rule as the solver)
+const CACHE_NAME = 'xwordsnap-v20'; // bump on every deploy (same rule as the solver)
 const ASSETS = [
   './', './index.html', './manifest.json', './css/app.css',
   './js/app.js', './js/detect.js', './js/puzzle.js', './js/clues.js',

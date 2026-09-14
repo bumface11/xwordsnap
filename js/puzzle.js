@@ -76,3 +76,50 @@ function shareUrlFor(xw) {
   const encoded = xw.serialize();   // LZ-string, URI-safe — same as sharePuzzle()
   return `${SOLVER_BASE}#${encoded}`;
 }
+
+// Builds a plain ipuz v2 object (https://www.ipuz.org/) straight from the
+// detected grid, for debugging the structure independent of the solver's
+// own LZ-string encoding. No solution letters are known yet, so the
+// "solution" section is omitted — only shape + clue numbering + clue text.
+function buildIpuz(rows, cols, blackCells, title = 'Scanned Crossword', clueText = null) {
+  const acrossText = (clueText && clueText.across) || {};
+  const downText = (clueText && clueText.down) || {};
+  const isBlock = (r, c) =>
+    r < 0 || c < 0 || r >= rows || c >= cols || blackCells[r][c];
+
+  const puzzleGrid = [];
+  const acrossClues = [];
+  const downClues = [];
+  let clueNum = 1;
+
+  for (let r = 0; r < rows; r++) {
+    const row = [];
+    for (let c = 0; c < cols; c++) {
+      if (blackCells[r][c]) {
+        row.push('#');
+        continue;
+      }
+      const startsAcross = isBlock(r, c - 1) && !isBlock(r, c + 1);
+      const startsDown = isBlock(r - 1, c) && !isBlock(r + 1, c);
+      if (startsAcross || startsDown) {
+        const number = clueNum++;
+        row.push(number);
+        if (startsAcross) acrossClues.push([number, acrossText[String(number)] || '']);
+        if (startsDown) downClues.push([number, downText[String(number)] || '']);
+      } else {
+        row.push(0);
+      }
+    }
+    puzzleGrid.push(row);
+  }
+
+  return {
+    version: 'http://ipuz.org/v2',
+    kind: ['http://ipuz.org/crossword#1'],
+    dimensions: { width: cols, height: rows },
+    title,
+    puzzle: puzzleGrid,
+    clues: { Across: acrossClues, Down: downClues },
+  };
+}
+

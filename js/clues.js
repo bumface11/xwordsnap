@@ -1,6 +1,7 @@
 /* global Tesseract, whenCvReady */
-// Step 3 support: preprocess a clue photo for OCR, run Tesseract on one or
-// more user-drawn boxes, and parse the recognized text into clue numbers.
+// Step 3 support: perspective-correct each user-drawn quadrilateral against
+// the raw clue photo, enhance it for OCR, run Tesseract, and parse the
+// recognized text into clue numbers.
 
 let ocrWorkerPromise = null;
 
@@ -17,56 +18,42 @@ function getOcrWorker() {
   return ocrWorkerPromise;
 }
 
-// Applies a conservative document-OCR pipeline without changing grid detection.
-async function preprocessForOcr(sourceCanvas) {
+// Perspective-warps a (possibly skewed) quadrilateral out of the raw photo
+// into an upright rectangle, then runs a conservative document-OCR pipeline
+// on just that crop. Using the quad's own corners for the perspective
+// transform deskews it exactly, rather than guessing a single whole-image
+// rotation angle.
+async function warpAndEnhanceQuad(sourceCanvas, corners) {
   const cv = await whenCvReady();
   const src = cv.imread(sourceCanvas);
+
+  const { tl, tr, br, bl } = corners;
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const width = Math.max(2, Math.round(Math.max(dist(tl, tr), dist(bl, br))));
+  const height = Math.max(2, Math.round(Math.max(dist(tl, bl), dist(tr, br))));
+
+  const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2,
+    [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]);
+  const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2,
+    [0, 0, width - 1, 0, width - 1, height - 1, 0, height - 1]);
+  const transform = cv.getPerspectiveTransform(srcPts, dstPts);
+  const warped = new cv.Mat();
+  cv.warpPerspective(src, warped, transform, new cv.Size(width, height),
+    cv.INTER_CUBIC, cv.BORDER_REPLICATE, new cv.Scalar());
+
   const gray = new cv.Mat();
-  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+  cv.cvtColor(warped, gray, cv.COLOR_RGBA2GRAY);
 
   const denoised = new cv.Mat();
   cv.medianBlur(gray, denoised, 3);
 
-  // Find the median angle of near-horizontal text strokes, then deskew before
-  // local contrast enhancement and thresholding.
-  const deskewProbe = new cv.Mat();
-  const deskewLines = new cv.Mat();
-  cv.adaptiveThreshold(denoised, deskewProbe, 255,
-    cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 25, 15);
-  cv.HoughLines(deskewProbe, deskewLines, 1, Math.PI / 180,
-    Math.max(80, Math.round(sourceCanvas.width / 8)));
-  const angles = [];
-  for (let i = 0; i < deskewLines.rows; i++) {
-    const angle = deskewLines.data32F[i * 2 + 1] * 180 / Math.PI - 90;
-    if (Math.abs(angle) < 10) angles.push(angle);
-  }
-  angles.sort((a, b) => a - b);
-  const skew = angles.length ? angles[Math.floor(angles.length / 2)] : 0;
-  deskewProbe.delete();
-  deskewLines.delete();
-
-  const deskewed = new cv.Mat();
-  if (Math.abs(skew) >= 0.5) {
-    const center = new cv.Point(denoised.cols / 2, denoised.rows / 2);
-    const transform = cv.getRotationMatrix2D(center, skew, 1);
-    cv.warpAffine(denoised, deskewed, transform,
-      new cv.Size(denoised.cols, denoised.rows), cv.INTER_CUBIC,
-      cv.BORDER_REPLICATE, new cv.Scalar());
-    transform.delete();
-  } else {
-    denoised.copyTo(deskewed);
-  }
-
   const contrast = new cv.Mat();
   if (typeof cv.createCLAHE === 'function') {
     const clahe = cv.createCLAHE(2, new cv.Size(8, 8));
-    clahe.apply(deskewed, contrast);
+    clahe.apply(denoised, contrast);
     clahe.delete();
   } else {
-    cv.normalize(deskewed, contrast, 0, 255, cv.NORM_MINMAX);
-    // Use histogram equalization instead of CLAHE
-    // const contrast = new cv.Mat();
-    // cv.equalizeHist(deskewed, contrast);
+    cv.normalize(denoised, contrast, 0, 255, cv.NORM_MINMAX);
   }
 
   const scale = contrast.cols < 1600 ? 1600 / contrast.cols : 1;
@@ -85,29 +72,19 @@ async function preprocessForOcr(sourceCanvas) {
   const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2, 2));
   cv.morphologyEx(binary, clean, cv.MORPH_OPEN, kernel);
 
-  const out = document.createElement('canvas');
-  out.width = clean.cols;
-  out.height = clean.rows;
-  cv.imshow(out, clean);
+  const padded = new cv.Mat();
+  cv.copyMakeBorder(clean, padded, 20, 20, 20, 20, cv.BORDER_CONSTANT, new cv.Scalar(255));
 
-  [src, gray, denoised, deskewed, contrast, resized, binary, clean, kernel]
+  const out = document.createElement('canvas');
+  out.width = padded.cols;
+  out.height = padded.rows;
+  cv.imshow(out, padded);
+
+  [src, srcPts, dstPts, transform, warped, gray, denoised, contrast, resized, binary, clean, kernel, padded]
     .forEach((m) => m.delete());
   return out;
 }
 
-
-function cropCanvas(source, rect) {
-  const padding = 20;
-  const out = document.createElement('canvas');
-  out.width = Math.max(1, Math.round(rect.w + padding * 2));
-  out.height = Math.max(1, Math.round(rect.h + padding * 2));
-  const ctx = out.getContext('2d');
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, out.width, out.height);
-  ctx.drawImage(source, rect.x, rect.y, rect.w, rect.h,
-    padding, padding, Math.round(rect.w), Math.round(rect.h));
-  return out;
-}
 
 // Clue text wraps across OCR lines; a clue ends once a line finishes with a
 // bracketed answer length like "(5)", "(4,3)" or "(3-4)". The next non-empty
@@ -146,14 +123,15 @@ function parseClueLines(rawText) {
 
 // Runs OCR on each box (in the order given) and merges the parsed clues into
 // { across: {number: text}, down: {number: text} }, keyed by the box's
-// user-assigned direction.
-async function recognizeClueBoxes(processedCanvas, boxes, onProgress) {
+// user-assigned direction. `sourceCanvas` is the raw (unprocessed) clue
+// photo — each box's quad is perspective-corrected and enhanced individually.
+async function recognizeClueBoxes(sourceCanvas, boxes, onProgress) {
   const worker = await getOcrWorker();
   const acrossText = {};
   const downText = {};
   for (let i = 0; i < boxes.length; i++) {
     const box = boxes[i];
-    const crop = cropCanvas(processedCanvas, box.rect);
+    const crop = await warpAndEnhanceQuad(sourceCanvas, box.corners);
     const { data } = await worker.recognize(crop);
     const bucket = box.direction === 'down' ? downText : acrossText;
     for (const { number, text } of parseClueLines(data.text)) bucket[number] = text;

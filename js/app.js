@@ -1,5 +1,5 @@
-/* global detectGrid, buildPuzzle, shareUrlFor, whenCvReady, preprocessForOcr, recognizeClueBoxes */
-const APP_BUILD = 'v15 · 2026-09-14';
+/* global detectGrid, buildPuzzle, buildIpuz, shareUrlFor, whenCvReady, recognizeClueBoxes */
+const APP_BUILD = 'v20 · 2026-09-14';
 
 let detection = null;
 let photoCanvas = null;   // downscaled source image
@@ -246,9 +246,12 @@ $('confirmGridBtn').addEventListener('click', () => {
 $('skipCluesFromReviewBtn').addEventListener('click', () => shareStep(null));
 
 // --- Step 4: share ---
+let lastShareArgs = null;   // { rows, cols, blackCells, title, clueText } from the most recent shareStep()
+
 function shareStep(clueText) {
   const { rows, cols, blackCells } = detection;
   const title = $('title').value.trim() || 'Scanned Crossword';
+  lastShareArgs = { rows, cols, blackCells, title, clueText };
   const xw = buildPuzzle(rows, cols, blackCells, title, clueText);
   const url = shareUrlFor(xw);
   $('shareLink').value = url;
@@ -261,10 +264,23 @@ function shareStep(clueText) {
 $('copyBtn').addEventListener('click', () =>
   navigator.clipboard.writeText($('shareLink').value));
 
+// Downloads the puzzle as a plain .ipuz file — handy for inspecting the grid
+// shape and clue numbering independent of the solver's own link encoding.
+$('downloadIpuzBtn').addEventListener('click', () => {
+  if (!lastShareArgs) return;
+  const { rows, cols, blackCells, title, clueText } = lastShareArgs;
+  const ipuz = buildIpuz(rows, cols, blackCells, title, clueText);
+  const blob = new Blob([JSON.stringify(ipuz, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${title.replace(/[^\w.-]+/g, '_') || 'xwordsnap'}.ipuz`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
 // --- Step 3: clue photo → OCR ---
-let cluesPhotoCanvas = null;      // raw captured clue photo
-let cluesProcessedCanvas = null;  // grayscale/thresholded version OCR runs on
-let clueBoxes = [];               // [{ rect: {x,y,w,h}, direction: 'across'|'down' }]
+let cluesPhotoCanvas = null;      // raw captured clue photo — boxes are drawn on this directly
+let clueBoxes = [];               // [{ corners: {tl,tr,br,bl: {x,y}}, direction: 'across'|'down' }]
 let clueBoxDragStart = null;      // { start, rect } while drawing a brand-new box
 let selectedBoxIndex = null;      // box currently showing corner handles
 let resizeState = null;           // { index, corner } while dragging a handle
@@ -284,18 +300,17 @@ $('cluesCamera').addEventListener('change', async (e) => {
     cluesPhotoCanvas.width = Math.round(img.naturalWidth * scale);
     cluesPhotoCanvas.height = Math.round(img.naturalHeight * scale);
     cluesPhotoCanvas.getContext('2d').drawImage(img, 0, 0, cluesPhotoCanvas.width, cluesPhotoCanvas.height);
-    await reprocessCluesPhoto();
+    resetCluesUiState();
     statusEl.textContent = 'Drag a box around each column of clue text.';
   } catch (err) {
     statusEl.textContent = '⚠️ ' + errMsg(err);
   }
 });
 
-// Re-runs OCR preprocessing on the current clue photo and resets anything
-// tied to its pixel coordinates (drawn boxes, extracted text).
-async function reprocessCluesPhoto() {
-  statusEl.textContent = 'Enhancing image for OCR…';
-  cluesProcessedCanvas = await preprocessForOcr(cluesPhotoCanvas);
+// Resets anything tied to the clue photo's pixel coordinates (drawn boxes,
+// extracted text). No OpenCV work happens here — enhancement is applied per
+// box, right before OCR, in recognizeClueBoxes.
+function resetCluesUiState() {
   clueBoxes = [];
   selectedBoxIndex = null;
   extractedClueText = null;
@@ -306,7 +321,7 @@ async function reprocessCluesPhoto() {
 }
 
 // Rotate the source clue photo 90° clockwise so the text reads upright.
-$('cluesRotateBtn').addEventListener('click', async () => {
+$('cluesRotateBtn').addEventListener('click', () => {
   if (!cluesPhotoCanvas) return;
   const rotated = document.createElement('canvas');
   rotated.width = cluesPhotoCanvas.height;
@@ -316,36 +331,43 @@ $('cluesRotateBtn').addEventListener('click', async () => {
   ctx.rotate(Math.PI / 2);
   ctx.drawImage(cluesPhotoCanvas, -cluesPhotoCanvas.width / 2, -cluesPhotoCanvas.height / 2);
   cluesPhotoCanvas = rotated;
-  try {
-    await reprocessCluesPhoto();
-    statusEl.textContent = 'Drag a box around each column of clue text.';
-  } catch (err) {
-    statusEl.textContent = '⚠️ ' + errMsg(err);
-  }
+  resetCluesUiState();
 });
 
 function drawCluesCanvas() {
   const canvas = $('cluesCanvas');
-  canvas.width = cluesProcessedCanvas.width;
-  canvas.height = cluesProcessedCanvas.height;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(cluesProcessedCanvas, 0, 0);
+  canvas.width = cluesPhotoCanvas.width;
+  canvas.height = cluesPhotoCanvas.height;
+  renderCluesScene(canvas.getContext('2d'), true);
+}
+
+// Draws the photo + box outlines (and optionally selection handles) onto any
+// canvas context — shared by the on-screen canvas and the magnifier loupe,
+// so the loupe can omit handles without duplicating the drawing logic.
+function renderCluesScene(ctx, includeHandles) {
+  ctx.drawImage(cluesPhotoCanvas, 0, 0);
   clueBoxes.forEach((box, i) => {
-    drawBoxOutline(ctx, box.rect, box.direction, i + 1);
-    if (i === selectedBoxIndex) drawHandles(ctx, box.rect);
+    drawBoxOutline(ctx, box.corners, box.direction, i + 1);
+    if (includeHandles && i === selectedBoxIndex) drawHandles(ctx, box.corners);
   });
   if (clueBoxDragStart && clueBoxDragStart.rect) {
-    drawBoxOutline(ctx, clueBoxDragStart.rect, 'across', clueBoxes.length + 1);
+    drawBoxOutline(ctx, cornerPoints(clueBoxDragStart.rect), 'across', clueBoxes.length + 1);
   }
 }
 
-function drawBoxOutline(ctx, rect, direction, label) {
+function drawBoxOutline(ctx, corners, direction, label) {
   ctx.strokeStyle = direction === 'down' ? '#e0a52f' : '#2f6fed';
   ctx.lineWidth = Math.max(2, ctx.canvas.width / 400);
-  ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.beginPath();
+  ctx.moveTo(corners.tl.x, corners.tl.y);
+  ctx.lineTo(corners.tr.x, corners.tr.y);
+  ctx.lineTo(corners.br.x, corners.br.y);
+  ctx.lineTo(corners.bl.x, corners.bl.y);
+  ctx.closePath();
+  ctx.stroke();
   ctx.fillStyle = ctx.strokeStyle;
   ctx.font = `${Math.max(14, ctx.canvas.width / 40)}px sans-serif`;
-  ctx.fillText(String(label), rect.x + 4, rect.y + 18);
+  ctx.fillText(String(label), corners.tl.x + 4, corners.tl.y + 18);
 }
 
 // Small draggable circles at each corner of the selected box, so it can be
@@ -363,12 +385,12 @@ function handleRadius(canvas) {
   return Math.max(9, canvas.width / 120);
 }
 
-function drawHandles(ctx, rect) {
+function drawHandles(ctx, corners) {
   const r = handleRadius(ctx.canvas);
   ctx.fillStyle = '#fff';
   ctx.strokeStyle = '#2f6fed';
   ctx.lineWidth = 2;
-  for (const p of Object.values(cornerPoints(rect))) {
+  for (const p of Object.values(corners)) {
     ctx.beginPath();
     ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
     ctx.fill();
@@ -376,15 +398,117 @@ function drawHandles(ctx, rect) {
   }
 }
 
-function hitTestHandle(rect, p, canvas) {
+function hitTestHandle(corners, p, canvas) {
   const r = handleRadius(canvas) * 1.6;   // slightly forgiving hit area for touch
-  const corners = cornerPoints(rect);
   return Object.keys(corners).find((key) =>
     Math.hypot(p.x - corners[key].x, p.y - corners[key].y) <= r) || null;
 }
 
-function pointInRect(p, rect) {
-  return p.x >= rect.x && p.x <= rect.x + rect.w && p.y >= rect.y && p.y <= rect.y + rect.h;
+// Even-odd point-in-polygon test against the (possibly non-rectangular) quad.
+function pointInQuad(p, corners) {
+  const pts = [corners.tl, corners.tr, corners.br, corners.bl];
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+    const intersect = ((yi > p.y) !== (yj > p.y)) &&
+      (p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+// Shoelace-formula area, used to drop a box if a handle drag has shrunk it
+// down to a sliver.
+function quadArea(corners) {
+  const pts = [corners.tl, corners.tr, corners.br, corners.bl];
+  let area = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    area += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
+  }
+  return Math.abs(area / 2);
+}
+
+// --- Magnifier loupe shown while dragging a corner handle ---
+// A fixed-position circular canvas that floats above the touch point (so
+// the finger doesn't cover it) and shows a zoomed-in crop of the clues
+// canvas centered on the handle, with a crosshair marking the exact point.
+let magnifierEl = null;
+let magnifierSourceCanvas = null;   // offscreen scene render without handles
+const MAGNIFIER_SIZE = 160;
+const MAGNIFIER_ZOOM = 1.2;
+const MAGNIFIER_OFFSET = 90; // px between the finger and the loupe center
+
+function ensureMagnifier() {
+  if (magnifierEl) return magnifierEl;
+  magnifierEl = document.createElement('canvas');
+  magnifierEl.width = MAGNIFIER_SIZE;
+  magnifierEl.height = MAGNIFIER_SIZE;
+  Object.assign(magnifierEl.style, {
+    position: 'fixed',
+    left: '0',
+    top: '0',
+    width: `${MAGNIFIER_SIZE}px`,
+    height: `${MAGNIFIER_SIZE}px`,
+    borderRadius: '50%',
+    border: '3px solid #2f6fed',
+    boxShadow: '0 2px 12px rgba(0,0,0,0.45)',
+    pointerEvents: 'none',
+    zIndex: '1000',
+    display: 'none',
+    background: '#fff',
+  });
+  document.body.appendChild(magnifierEl);
+  return magnifierEl;
+}
+
+// canvasPoint: the drag point in cluesCanvas pixel space (for the zoomed crop).
+// clientX/clientY: the pointer's viewport position (for placing the loupe).
+function updateMagnifier(canvasPoint, clientX, clientY) {
+  const canvas = $('cluesCanvas');
+  const mag = ensureMagnifier();
+  const srcSize = MAGNIFIER_SIZE / MAGNIFIER_ZOOM;
+  const sx = Math.min(Math.max(canvasPoint.x - srcSize / 2, 0), Math.max(canvas.width - srcSize, 0));
+  const sy = Math.min(Math.max(canvasPoint.y - srcSize / 2, 0), Math.max(canvas.height - srcSize, 0));
+
+  // Render a handle-free copy of the scene so the dragged handle's white
+  // fill doesn't cover the exact spot the user is trying to see.
+  if (!magnifierSourceCanvas) magnifierSourceCanvas = document.createElement('canvas');
+  magnifierSourceCanvas.width = canvas.width;
+  magnifierSourceCanvas.height = canvas.height;
+  renderCluesScene(magnifierSourceCanvas.getContext('2d'), false);
+
+  const ctx = mag.getContext('2d');
+  ctx.clearRect(0, 0, MAGNIFIER_SIZE, MAGNIFIER_SIZE);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(MAGNIFIER_SIZE / 2, MAGNIFIER_SIZE / 2, MAGNIFIER_SIZE / 2 - 2, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.drawImage(magnifierSourceCanvas, sx, sy, srcSize, srcSize, 0, 0, MAGNIFIER_SIZE, MAGNIFIER_SIZE);
+  ctx.restore();
+
+  // Crosshair at the exact handle position within the zoomed crop.
+  const relX = (canvasPoint.x - sx) * MAGNIFIER_ZOOM;
+  const relY = (canvasPoint.y - sy) * MAGNIFIER_ZOOM;
+  ctx.strokeStyle = '#e0442f';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(relX - 9, relY); ctx.lineTo(relX + 9, relY);
+  ctx.moveTo(relX, relY - 9); ctx.lineTo(relX, relY + 9);
+  ctx.stroke();
+
+  // Float the loupe above the finger by default so it stays visible; flip
+  // below if there isn't room above, and clamp horizontally to the viewport.
+  let left = clientX - MAGNIFIER_SIZE / 2;
+  let top = clientY - MAGNIFIER_OFFSET - MAGNIFIER_SIZE / 2;
+  if (top < 8) top = clientY + MAGNIFIER_OFFSET - MAGNIFIER_SIZE / 2;
+  left = Math.min(Math.max(left, 8), window.innerWidth - MAGNIFIER_SIZE - 8);
+  mag.style.left = `${left}px`;
+  mag.style.top = `${top}px`;
+  mag.style.display = 'block';
+}
+
+function hideMagnifier() {
+  if (magnifierEl) magnifierEl.style.display = 'none';
 }
 
 function cluesCanvasPoint(e) {
@@ -397,21 +521,22 @@ function cluesCanvasPoint(e) {
 }
 
 $('cluesCanvas').addEventListener('pointerdown', (e) => {
-  if (!cluesProcessedCanvas) return;
+  if (!cluesPhotoCanvas) return;
   e.preventDefault();
   const canvas = e.target;
   const p = cluesCanvasPoint(e);
 
   if (selectedBoxIndex !== null) {
-    const corner = hitTestHandle(clueBoxes[selectedBoxIndex].rect, p, canvas);
+    const corner = hitTestHandle(clueBoxes[selectedBoxIndex].corners, p, canvas);
     if (corner) {
       resizeState = { index: selectedBoxIndex, corner };
       canvas.setPointerCapture(e.pointerId);
+      updateMagnifier(p, e.clientX, e.clientY);
       return;
     }
   }
 
-  const hitIndex = clueBoxes.findIndex((box) => pointInRect(p, box.rect));
+  const hitIndex = clueBoxes.findIndex((box) => pointInQuad(p, box.corners));
   if (hitIndex !== -1) {
     selectedBoxIndex = hitIndex;
     drawCluesCanvas();
@@ -429,18 +554,12 @@ $('cluesCanvas').addEventListener('pointermove', (e) => {
 
   if (resizeState) {
     const { index, corner } = resizeState;
-    const rect = clueBoxes[index].rect;
-    const anchor = {
-      x: corner.includes('l') ? rect.x + rect.w : rect.x,
-      y: corner.includes('t') ? rect.y + rect.h : rect.y,
-    };
-    clueBoxes[index].rect = {
-      x: Math.round(Math.min(anchor.x, p.x)),
-      y: Math.round(Math.min(anchor.y, p.y)),
-      w: Math.round(Math.abs(anchor.x - p.x)),
-      h: Math.round(Math.abs(anchor.y - p.y)),
-    };
+    // Move only the dragged vertex — the other three corners stay put, so
+    // the box can be skewed into an arbitrary quadrilateral, not just resized
+    // as a rectangle.
+    clueBoxes[index].corners[corner] = { x: Math.round(p.x), y: Math.round(p.y) };
     drawCluesCanvas();
+    updateMagnifier(p, e.clientX, e.clientY);
     return;
   }
 
@@ -455,25 +574,37 @@ $('cluesCanvas').addEventListener('pointermove', (e) => {
 });
 $('cluesCanvas').addEventListener('pointerup', () => {
   if (resizeState) {
-    const rect = clueBoxes[resizeState.index].rect;
-    if (rect.w < 20 || rect.h < 20) {
+    const corners = clueBoxes[resizeState.index].corners;
+    if (quadArea(corners) < 400) {
       // Shrunk down to a sliver — drop it rather than leave an unusable box.
       clueBoxes.splice(resizeState.index, 1);
       selectedBoxIndex = null;
       renderBoxList();
     }
     resizeState = null;
+    hideMagnifier();
     drawCluesCanvas();
     return;
   }
 
   if (clueBoxDragStart && clueBoxDragStart.rect &&
       clueBoxDragStart.rect.w >= 20 && clueBoxDragStart.rect.h >= 20) {
-    clueBoxes.push({ rect: clueBoxDragStart.rect, direction: 'across' });
+    // The box always starts life as a plain rectangle; its four corners
+    // become independently draggable afterwards via the handles.
+    clueBoxes.push({ corners: cornerPoints(clueBoxDragStart.rect), direction: 'across' });
     selectedBoxIndex = clueBoxes.length - 1;
     renderBoxList();
   }
   clueBoxDragStart = null;
+  drawCluesCanvas();
+});
+
+$('cluesCanvas').addEventListener('pointercancel', () => {
+  // Touch drags can be cancelled by the OS (e.g. a scroll gesture taking
+  // over) — make sure we don't get stuck with a phantom drag or loupe.
+  resizeState = null;
+  clueBoxDragStart = null;
+  hideMagnifier();
   drawCluesCanvas();
 });
 
@@ -536,7 +667,7 @@ $('extractCluesBtn').addEventListener('click', async () => {
   }
   statusEl.textContent = 'Running OCR… 0%';
   try {
-    extractedClueText = await recognizeClueBoxes(cluesProcessedCanvas, clueBoxes, (frac) => {
+    extractedClueText = await recognizeClueBoxes(cluesPhotoCanvas, clueBoxes, (frac) => {
       statusEl.textContent = `Running OCR… ${Math.round(frac * 100)}%`;
     });
     renderClueResults();

@@ -54,7 +54,7 @@
         <button id="cluesRotateBtn" class="secondary" title="Rotate the photo so the clue text reads upright">⟲ Rotate</button>
         <button id="undoBoxBtn" class="secondary">Undo last box</button>
       </div>
-      <p class="hint">Drag a box around each column of clue text, choose its direction, then extract. Draw more boxes for more columns.</p>
+      <p class="hint">Drag a box around each column of clue text, then drag its corner handles to trace any skew — each box is straightened and enhanced individually before OCR. Choose its direction, then extract. Draw more boxes for more columns.</p>
       <div id="cluesBoxList"></div>
       <div class="btn-row">
         <button id="extractCluesBtn">Extract clues (OCR)</button>
@@ -71,6 +71,7 @@
       <input id="shareLink" readonly>
       <button id="copyBtn">Copy</button>
       <a id="openBtn" target="_blank" rel="noopener">Open in solver</a>
+      <button id="downloadIpuzBtn" class="secondary">⬇ Download .ipuz (debug)</button>
     </section>
 
     <p id="status" role="status">Loading OpenCV…</p>

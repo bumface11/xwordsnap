@@ -45,14 +45,16 @@ function buildPuzzle(rows, cols, blackCells, title = 'Scanned Crossword', clueTe
         if (startsAcross) {
           const wordCells = [];
           for (let cc = c; !isBlock(r, cc); cc++) wordCells.push([cc, r]);
-          words.push({ id: cell.number, cells: wordCells });
-          across.clue.push({ word: cell.number, number: cell.number, text: acrossText[cell.number] || '---' });
+          const wordId = `${cell.number}-across`;
+          words.push({ id: wordId, cells: wordCells });
+          across.clue.push({ word: wordId, number: cell.number, text: acrossText[cell.number] || '---' });
         }
         if (startsDown) {
           const wordCells = [];
           for (let rr = r; !isBlock(rr, c); rr++) wordCells.push([c, rr]);
-          words.push({ id: cell.number, cells: wordCells });
-          down.clue.push({ word: cell.number, number: cell.number, text: downText[cell.number] || '---' });
+          const wordId = `${cell.number}-down`;
+          words.push({ id: wordId, cells: wordCells });
+          down.clue.push({ word: wordId, number: cell.number, text: downText[cell.number] || '---' });
         }
       }
       cells.push(cell);
@@ -122,4 +124,3 @@ function buildIpuz(rows, cols, blackCells, title = 'Scanned Crossword', clueText
     clues: { Across: acrossClues, Down: downClues },
   };
 }
-

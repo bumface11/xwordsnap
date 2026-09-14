@@ -1,5 +1,5 @@
 /* global detectGrid, buildPuzzle, buildIpuz, shareUrlFor, whenCvReady, recognizeClueBoxes */
-const APP_BUILD = 'v20 · 2026-09-14';
+const APP_BUILD = 'v21 · 2026-09-14';
 
 let detection = null;
 let photoCanvas = null;   // downscaled source image

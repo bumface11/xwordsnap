@@ -1,5 +1,5 @@
 /* global detectGrid, buildPuzzle, shareUrlFor, whenCvReady, preprocessForOcr, recognizeClueBoxes */
-const APP_BUILD = 'v10 · 2026-09-14';
+const APP_BUILD = 'v15 · 2026-09-14';
 
 let detection = null;
 let photoCanvas = null;   // downscaled source image
@@ -243,6 +243,8 @@ $('confirmGridBtn').addEventListener('click', () => {
   $('clues').scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
+$('skipCluesFromReviewBtn').addEventListener('click', () => shareStep(null));
+
 // --- Step 4: share ---
 function shareStep(clueText) {
   const { rows, cols, blackCells } = detection;
@@ -263,7 +265,9 @@ $('copyBtn').addEventListener('click', () =>
 let cluesPhotoCanvas = null;      // raw captured clue photo
 let cluesProcessedCanvas = null;  // grayscale/thresholded version OCR runs on
 let clueBoxes = [];               // [{ rect: {x,y,w,h}, direction: 'across'|'down' }]
-let clueBoxDragStart = null;
+let clueBoxDragStart = null;      // { start, rect } while drawing a brand-new box
+let selectedBoxIndex = null;      // box currently showing corner handles
+let resizeState = null;           // { index, corner } while dragging a handle
 let extractedClueText = null;     // { across: {number:text}, down: {number:text} }
 
 $('cluesCamera').addEventListener('change', async (e) => {
@@ -280,15 +284,40 @@ $('cluesCamera').addEventListener('change', async (e) => {
     cluesPhotoCanvas.width = Math.round(img.naturalWidth * scale);
     cluesPhotoCanvas.height = Math.round(img.naturalHeight * scale);
     cluesPhotoCanvas.getContext('2d').drawImage(img, 0, 0, cluesPhotoCanvas.width, cluesPhotoCanvas.height);
+    await reprocessCluesPhoto();
+    statusEl.textContent = 'Drag a box around each column of clue text.';
+  } catch (err) {
+    statusEl.textContent = '⚠️ ' + errMsg(err);
+  }
+});
 
-    statusEl.textContent = 'Enhancing image for OCR…';
-    cluesProcessedCanvas = await preprocessForOcr(cluesPhotoCanvas);
-    clueBoxes = [];
-    extractedClueText = null;
-    $('confirmCluesBtn').hidden = true;
-    $('cluesResultList').innerHTML = '';
-    drawCluesCanvas();
-    renderBoxList();
+// Re-runs OCR preprocessing on the current clue photo and resets anything
+// tied to its pixel coordinates (drawn boxes, extracted text).
+async function reprocessCluesPhoto() {
+  statusEl.textContent = 'Enhancing image for OCR…';
+  cluesProcessedCanvas = await preprocessForOcr(cluesPhotoCanvas);
+  clueBoxes = [];
+  selectedBoxIndex = null;
+  extractedClueText = null;
+  $('confirmCluesBtn').hidden = true;
+  $('cluesResultList').innerHTML = '';
+  drawCluesCanvas();
+  renderBoxList();
+}
+
+// Rotate the source clue photo 90° clockwise so the text reads upright.
+$('cluesRotateBtn').addEventListener('click', async () => {
+  if (!cluesPhotoCanvas) return;
+  const rotated = document.createElement('canvas');
+  rotated.width = cluesPhotoCanvas.height;
+  rotated.height = cluesPhotoCanvas.width;
+  const ctx = rotated.getContext('2d');
+  ctx.translate(rotated.width / 2, rotated.height / 2);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(cluesPhotoCanvas, -cluesPhotoCanvas.width / 2, -cluesPhotoCanvas.height / 2);
+  cluesPhotoCanvas = rotated;
+  try {
+    await reprocessCluesPhoto();
     statusEl.textContent = 'Drag a box around each column of clue text.';
   } catch (err) {
     statusEl.textContent = '⚠️ ' + errMsg(err);
@@ -301,7 +330,10 @@ function drawCluesCanvas() {
   canvas.height = cluesProcessedCanvas.height;
   const ctx = canvas.getContext('2d');
   ctx.drawImage(cluesProcessedCanvas, 0, 0);
-  clueBoxes.forEach((box, i) => drawBoxOutline(ctx, box.rect, box.direction, i + 1));
+  clueBoxes.forEach((box, i) => {
+    drawBoxOutline(ctx, box.rect, box.direction, i + 1);
+    if (i === selectedBoxIndex) drawHandles(ctx, box.rect);
+  });
   if (clueBoxDragStart && clueBoxDragStart.rect) {
     drawBoxOutline(ctx, clueBoxDragStart.rect, 'across', clueBoxes.length + 1);
   }
@@ -316,6 +348,45 @@ function drawBoxOutline(ctx, rect, direction, label) {
   ctx.fillText(String(label), rect.x + 4, rect.y + 18);
 }
 
+// Small draggable circles at each corner of the selected box, so it can be
+// fine-tuned after the initial drag without redrawing it from scratch.
+function cornerPoints(rect) {
+  return {
+    tl: { x: rect.x, y: rect.y },
+    tr: { x: rect.x + rect.w, y: rect.y },
+    bl: { x: rect.x, y: rect.y + rect.h },
+    br: { x: rect.x + rect.w, y: rect.y + rect.h },
+  };
+}
+
+function handleRadius(canvas) {
+  return Math.max(9, canvas.width / 120);
+}
+
+function drawHandles(ctx, rect) {
+  const r = handleRadius(ctx.canvas);
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#2f6fed';
+  ctx.lineWidth = 2;
+  for (const p of Object.values(cornerPoints(rect))) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function hitTestHandle(rect, p, canvas) {
+  const r = handleRadius(canvas) * 1.6;   // slightly forgiving hit area for touch
+  const corners = cornerPoints(rect);
+  return Object.keys(corners).find((key) =>
+    Math.hypot(p.x - corners[key].x, p.y - corners[key].y) <= r) || null;
+}
+
+function pointInRect(p, rect) {
+  return p.x >= rect.x && p.x <= rect.x + rect.w && p.y >= rect.y && p.y <= rect.y + rect.h;
+}
+
 function cluesCanvasPoint(e) {
   const canvas = $('cluesCanvas');
   const rect = canvas.getBoundingClientRect();
@@ -328,12 +399,52 @@ function cluesCanvasPoint(e) {
 $('cluesCanvas').addEventListener('pointerdown', (e) => {
   if (!cluesProcessedCanvas) return;
   e.preventDefault();
-  clueBoxDragStart = { start: cluesCanvasPoint(e), rect: null };
-  e.target.setPointerCapture(e.pointerId);
+  const canvas = e.target;
+  const p = cluesCanvasPoint(e);
+
+  if (selectedBoxIndex !== null) {
+    const corner = hitTestHandle(clueBoxes[selectedBoxIndex].rect, p, canvas);
+    if (corner) {
+      resizeState = { index: selectedBoxIndex, corner };
+      canvas.setPointerCapture(e.pointerId);
+      return;
+    }
+  }
+
+  const hitIndex = clueBoxes.findIndex((box) => pointInRect(p, box.rect));
+  if (hitIndex !== -1) {
+    selectedBoxIndex = hitIndex;
+    drawCluesCanvas();
+    renderBoxList();
+    return;
+  }
+
+  selectedBoxIndex = null;
+  clueBoxDragStart = { start: p, rect: null };
+  canvas.setPointerCapture(e.pointerId);
+  drawCluesCanvas();
 });
 $('cluesCanvas').addEventListener('pointermove', (e) => {
-  if (!clueBoxDragStart) return;
   const p = cluesCanvasPoint(e);
+
+  if (resizeState) {
+    const { index, corner } = resizeState;
+    const rect = clueBoxes[index].rect;
+    const anchor = {
+      x: corner.includes('l') ? rect.x + rect.w : rect.x,
+      y: corner.includes('t') ? rect.y + rect.h : rect.y,
+    };
+    clueBoxes[index].rect = {
+      x: Math.round(Math.min(anchor.x, p.x)),
+      y: Math.round(Math.min(anchor.y, p.y)),
+      w: Math.round(Math.abs(anchor.x - p.x)),
+      h: Math.round(Math.abs(anchor.y - p.y)),
+    };
+    drawCluesCanvas();
+    return;
+  }
+
+  if (!clueBoxDragStart) return;
   clueBoxDragStart.rect = {
     x: Math.round(Math.min(clueBoxDragStart.start.x, p.x)),
     y: Math.round(Math.min(clueBoxDragStart.start.y, p.y)),
@@ -343,17 +454,32 @@ $('cluesCanvas').addEventListener('pointermove', (e) => {
   drawCluesCanvas();
 });
 $('cluesCanvas').addEventListener('pointerup', () => {
+  if (resizeState) {
+    const rect = clueBoxes[resizeState.index].rect;
+    if (rect.w < 20 || rect.h < 20) {
+      // Shrunk down to a sliver — drop it rather than leave an unusable box.
+      clueBoxes.splice(resizeState.index, 1);
+      selectedBoxIndex = null;
+      renderBoxList();
+    }
+    resizeState = null;
+    drawCluesCanvas();
+    return;
+  }
+
   if (clueBoxDragStart && clueBoxDragStart.rect &&
       clueBoxDragStart.rect.w >= 20 && clueBoxDragStart.rect.h >= 20) {
     clueBoxes.push({ rect: clueBoxDragStart.rect, direction: 'across' });
+    selectedBoxIndex = clueBoxes.length - 1;
+    renderBoxList();
   }
   clueBoxDragStart = null;
   drawCluesCanvas();
-  renderBoxList();
 });
 
 $('undoBoxBtn').addEventListener('click', () => {
   clueBoxes.pop();
+  if (selectedBoxIndex !== null && selectedBoxIndex >= clueBoxes.length) selectedBoxIndex = null;
   drawCluesCanvas();
   renderBoxList();
 });
@@ -363,7 +489,13 @@ function renderBoxList() {
   wrap.innerHTML = '';
   clueBoxes.forEach((box, i) => {
     const row = document.createElement('div');
-    row.className = 'clue-box-row';
+    row.className = 'clue-box-row' + (i === selectedBoxIndex ? ' selected' : '');
+    row.onclick = (e) => {
+      if (e.target.closest('select, button')) return;
+      selectedBoxIndex = i;
+      drawCluesCanvas();
+      renderBoxList();
+    };
 
     const label = document.createElement('span');
     label.textContent = `Box ${i + 1}`;
@@ -386,6 +518,8 @@ function renderBoxList() {
     removeBtn.textContent = 'Remove';
     removeBtn.onclick = () => {
       clueBoxes.splice(i, 1);
+      if (selectedBoxIndex === i) selectedBoxIndex = null;
+      else if (selectedBoxIndex !== null && selectedBoxIndex > i) selectedBoxIndex--;
       drawCluesCanvas();
       renderBoxList();
     };

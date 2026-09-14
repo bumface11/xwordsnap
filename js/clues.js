@@ -17,45 +17,95 @@ function getOcrWorker() {
   return ocrWorkerPromise;
 }
 
-// Grayscale + upscale + adaptive threshold — OCR engines do far better on
-// clean black-on-white text than on a raw phone photo of a newspaper page.
+// Applies a conservative document-OCR pipeline without changing grid detection.
 async function preprocessForOcr(sourceCanvas) {
   const cv = await whenCvReady();
   const src = cv.imread(sourceCanvas);
   const gray = new cv.Mat();
   cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 
-  const scale = sourceCanvas.width < 1600 ? 1600 / sourceCanvas.width : 1;
-  const resized = new cv.Mat();
-  if (scale > 1) {
-    cv.resize(gray, resized, new cv.Size(0, 0), scale, scale, cv.INTER_CUBIC);
+  const denoised = new cv.Mat();
+  cv.medianBlur(gray, denoised, 3);
+
+  // Find the median angle of near-horizontal text strokes, then deskew before
+  // local contrast enhancement and thresholding.
+  const deskewProbe = new cv.Mat();
+  const deskewLines = new cv.Mat();
+  cv.adaptiveThreshold(denoised, deskewProbe, 255,
+    cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 25, 15);
+  cv.HoughLines(deskewProbe, deskewLines, 1, Math.PI / 180,
+    Math.max(80, Math.round(sourceCanvas.width / 8)));
+  const angles = [];
+  for (let i = 0; i < deskewLines.rows; i++) {
+    const angle = deskewLines.data32F[i * 2 + 1] * 180 / Math.PI - 90;
+    if (Math.abs(angle) < 10) angles.push(angle);
+  }
+  angles.sort((a, b) => a - b);
+  const skew = angles.length ? angles[Math.floor(angles.length / 2)] : 0;
+  deskewProbe.delete();
+  deskewLines.delete();
+
+  const deskewed = new cv.Mat();
+  if (Math.abs(skew) >= 0.5) {
+    const center = new cv.Point(denoised.cols / 2, denoised.rows / 2);
+    const transform = cv.getRotationMatrix2D(center, skew, 1);
+    cv.warpAffine(denoised, deskewed, transform,
+      new cv.Size(denoised.cols, denoised.rows), cv.INTER_CUBIC,
+      cv.BORDER_REPLICATE, new cv.Scalar());
+    transform.delete();
   } else {
-    gray.copyTo(resized);
+    denoised.copyTo(deskewed);
   }
 
-  const normalized = new cv.Mat();
-  cv.normalize(resized, normalized, 0, 255, cv.NORM_MINMAX);
+  const contrast = new cv.Mat();
+  if (typeof cv.createCLAHE === 'function') {
+    const clahe = cv.createCLAHE(2, new cv.Size(8, 8));
+    clahe.apply(deskewed, contrast);
+    clahe.delete();
+  } else {
+    cv.normalize(deskewed, contrast, 0, 255, cv.NORM_MINMAX);
+    // Use histogram equalization instead of CLAHE
+    // const contrast = new cv.Mat();
+    // cv.equalizeHist(deskewed, contrast);
+  }
+
+  const scale = contrast.cols < 1600 ? 1600 / contrast.cols : 1;
+  const resized = new cv.Mat();
+  if (scale > 1) {
+    cv.resize(contrast, resized, new cv.Size(0, 0), scale, scale, cv.INTER_CUBIC);
+  } else {
+    contrast.copyTo(resized);
+  }
 
   const binary = new cv.Mat();
-  cv.adaptiveThreshold(normalized, binary, 255,
+  cv.adaptiveThreshold(resized, binary, 255,
     cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 25, 15);
 
-  const out = document.createElement('canvas');
-  out.width = binary.cols;
-  out.height = binary.rows;
-  cv.imshow(out, binary);
+  const clean = new cv.Mat();
+  const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2, 2));
+  cv.morphologyEx(binary, clean, cv.MORPH_OPEN, kernel);
 
-  [src, gray, resized, normalized, binary].forEach((m) => m.delete());
+  const out = document.createElement('canvas');
+  out.width = clean.cols;
+  out.height = clean.rows;
+  cv.imshow(out, clean);
+
+  [src, gray, denoised, deskewed, contrast, resized, binary, clean, kernel]
+    .forEach((m) => m.delete());
   return out;
 }
 
 
 function cropCanvas(source, rect) {
+  const padding = 20;
   const out = document.createElement('canvas');
-  out.width = Math.max(1, Math.round(rect.w));
-  out.height = Math.max(1, Math.round(rect.h));
-  out.getContext('2d').drawImage(
-    source, rect.x, rect.y, rect.w, rect.h, 0, 0, out.width, out.height);
+  out.width = Math.max(1, Math.round(rect.w + padding * 2));
+  out.height = Math.max(1, Math.round(rect.h + padding * 2));
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(source, rect.x, rect.y, rect.w, rect.h,
+    padding, padding, Math.round(rect.w), Math.round(rect.h));
   return out;
 }
 

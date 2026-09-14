@@ -37,7 +37,10 @@
       <h2><span class="step-num">2</span> <span id="dims"></span></h2>
       <div id="gridOverlay"></div>  <!-- tap a cell to toggle black/white -->
       <input id="title" placeholder="Puzzle title (optional)">
-      <button id="confirmGridBtn">Continue: scan clues →</button>
+      <div class="btn-row">
+        <button id="skipCluesFromReviewBtn" class="secondary">Skip clues → generate link</button>
+        <button id="confirmGridBtn">Continue: scan clues →</button>
+      </div>
     </section>
 
     <section id="clues" class="step" hidden>
@@ -47,10 +50,13 @@
         <input id="cluesCamera" type="file" accept="image/*" capture="environment" hidden>
       </label>
       <canvas id="cluesCanvas"></canvas>
+      <div class="btn-row">
+        <button id="cluesRotateBtn" class="secondary" title="Rotate the photo so the clue text reads upright">⟲ Rotate</button>
+        <button id="undoBoxBtn" class="secondary">Undo last box</button>
+      </div>
       <p class="hint">Drag a box around each column of clue text, choose its direction, then extract. Draw more boxes for more columns.</p>
       <div id="cluesBoxList"></div>
       <div class="btn-row">
-        <button id="undoBoxBtn" class="secondary">Undo last box</button>
         <button id="extractCluesBtn">Extract clues (OCR)</button>
       </div>
       <div id="cluesResultList"></div>

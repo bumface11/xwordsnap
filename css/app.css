@@ -97,6 +97,15 @@ h2 { font-size: 1.1rem; margin: 0; }
   align-items: center;
   gap: 0.5rem;
 }
+.clue-box-row {
+  padding: 0.4rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.clue-box-row.selected {
+  background: rgba(47, 111, 237, 0.18);
+  outline: 1px solid #2f6fed;
+}
 .clue-box-row span, .clue-edit-row span {
   min-width: 2rem;
   color: #ccc;

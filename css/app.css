@@ -41,12 +41,32 @@ h2 { font-size: 1.1rem; margin: 0; }
   border-radius: 8px;
 }
 
-#review, #result, #crop {
+.step {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  background: #181818;
+  scroll-margin-top: 0.5rem;
 }
-#review[hidden], #result[hidden], #crop[hidden], #photo[hidden] { display: none; }
+.step[hidden], #photo[hidden] { display: none; }
+
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-right: 0.4rem;
+  border-radius: 50%;
+  background: #2f6fed;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
 
 #cropCanvas {
   width: 100%;
@@ -55,6 +75,55 @@ h2 { font-size: 1.1rem; margin: 0; }
   background: #000;
   cursor: crosshair;
   touch-action: none;   /* let pointer events drive the crop rect on touch */
+}
+
+#cluesCanvas {
+  width: 100%;
+  display: block;
+  border-radius: 8px;
+  background: #000;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.hint {
+  margin: 0;
+  color: #aaa;
+  font-size: 0.85rem;
+}
+
+.clue-box-row, .clue-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.clue-box-row span, .clue-edit-row span {
+  min-width: 2rem;
+  color: #ccc;
+  font-size: 0.9rem;
+}
+.clue-box-row select {
+  padding: 0.4rem;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #1c1c1c;
+  color: #f0f0f0;
+}
+.clue-box-row button { flex: none; }
+.clue-edit-row textarea {
+  flex: 1;
+  min-height: 2.4rem;
+  padding: 0.5rem;
+  font-size: 0.95rem;
+  border: 1px solid #444;
+  border-radius: 8px;
+  background: #1c1c1c;
+  color: #f0f0f0;
+  resize: vertical;
+}
+#cluesResultList h3 {
+  margin: 0.25rem 0 0;
+  font-size: 1rem;
 }
 
 .btn-row { display: flex; gap: 0.5rem; }

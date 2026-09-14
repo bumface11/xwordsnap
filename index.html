@@ -8,6 +8,7 @@
   <meta name="theme-color" content="#111111">
   <link rel="stylesheet" href="css/app.css">
   <script src="lib/jscrossword_combined.js"></script>
+  <script src="lib/tesseract.min.js"></script>
 </head>
 <body>
   <main id="app">
@@ -22,23 +23,45 @@
 
     <img id="photo" hidden>
 
-    <section id="crop" hidden>
-      <h2>Crop to the grid</h2>
+    <section id="crop" class="step" hidden>
+      <h2><span class="step-num">1</span> Crop to the grid</h2>
       <canvas id="cropCanvas"></canvas>
       <div class="btn-row">
+        <button id="rotateBtn" class="secondary" title="Rotate the photo so the top of the grid is at the top">⟲ Rotate</button>
         <button id="detectBtn">Detect grid in selection</button>
         <button id="fullBtn" class="secondary">Use whole image</button>
       </div>
     </section>
 
-    <section id="review" hidden>
-      <h2 id="dims"></h2>
+    <section id="review" class="step" hidden>
+      <h2><span class="step-num">2</span> <span id="dims"></span></h2>
       <div id="gridOverlay"></div>  <!-- tap a cell to toggle black/white -->
       <input id="title" placeholder="Puzzle title (optional)">
-      <button id="shareBtn">Generate solver link</button>
+      <button id="confirmGridBtn">Continue: scan clues →</button>
     </section>
 
-    <section id="result" hidden>
+    <section id="clues" class="step" hidden>
+      <h2><span class="step-num">3</span> Scan the clues</h2>
+      <label class="scan-btn">
+        📷 Take a photo of the clues
+        <input id="cluesCamera" type="file" accept="image/*" capture="environment" hidden>
+      </label>
+      <canvas id="cluesCanvas"></canvas>
+      <p class="hint">Drag a box around each column of clue text, choose its direction, then extract. Draw more boxes for more columns.</p>
+      <div id="cluesBoxList"></div>
+      <div class="btn-row">
+        <button id="undoBoxBtn" class="secondary">Undo last box</button>
+        <button id="extractCluesBtn">Extract clues (OCR)</button>
+      </div>
+      <div id="cluesResultList"></div>
+      <div class="btn-row">
+        <button id="skipCluesBtn" class="secondary">Skip clues</button>
+        <button id="confirmCluesBtn" hidden>Use these clues →</button>
+      </div>
+    </section>
+
+    <section id="result" class="step" hidden>
+      <h2><span class="step-num">4</span> Share</h2>
       <input id="shareLink" readonly>
       <button id="copyBtn">Copy</button>
       <a id="openBtn" target="_blank" rel="noopener">Open in solver</a>
@@ -50,6 +73,7 @@
   </main>
   <script src="js/detect.js"></script>
   <script src="js/puzzle.js"></script>
+  <script src="js/clues.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

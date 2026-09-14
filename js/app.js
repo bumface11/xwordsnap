@@ -1,5 +1,5 @@
-/* global detectGrid, buildPuzzle, shareUrlFor, whenCvReady */
-const APP_BUILD = 'v8 · 2026-09-07';
+/* global detectGrid, buildPuzzle, shareUrlFor, whenCvReady, preprocessForOcr, recognizeClueBoxes */
+const APP_BUILD = 'v10 · 2026-09-14';
 
 let detection = null;
 let photoCanvas = null;   // downscaled source image
@@ -97,12 +97,28 @@ function makeSampleGrid(n = 15, px = 900) {
 function showCropStep() {
   $('crop').hidden = false;
   $('review').hidden = true;
+  $('clues').hidden = true;
   $('result').hidden = true;
   cropRect = null;
   drawCrop();
-  statusEl.textContent = 'Drag on the image to select just the grid (or use the whole image).';
-  $('crop').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  statusEl.textContent = 'Drag on the image to select just the grid (or use the whole image). Rotate if the top of the grid isn\u2019t at the top.';
+  $('crop').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+
+// Rotate the source photo 90° clockwise so the user can orient the grid
+// upright before cropping/detecting.
+$('rotateBtn').addEventListener('click', () => {
+  const rotated = document.createElement('canvas');
+  rotated.width = photoCanvas.height;
+  rotated.height = photoCanvas.width;
+  const ctx = rotated.getContext('2d');
+  ctx.translate(rotated.width / 2, rotated.height / 2);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(photoCanvas, -photoCanvas.width / 2, -photoCanvas.height / 2);
+  photoCanvas = rotated;
+  cropRect = null;
+  drawCrop();
+});
 
 function drawCrop() {
   const canvas = $('cropCanvas');
@@ -161,8 +177,8 @@ async function runDetection(source) {
     console.log('detection result', detection);   // inspectable in DevTools
     renderReview();
     $('review').hidden = false;
-    $('result').hidden = true;
     statusEl.textContent = 'Tap cells to fix mistakes, then share.';
+    $('review').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (err) {
     console.error('detection failed', err);
     statusEl.textContent = '⚠️ ' + errMsg(err);
@@ -221,18 +237,209 @@ function renderReview() {
   wrap.appendChild(overlay);
 }
 
-$('shareBtn').addEventListener('click', () => {
+$('confirmGridBtn').addEventListener('click', () => {
+  $('clues').hidden = false;
+  statusEl.textContent = 'Take a photo of the clues, then draw a box around each column of text.';
+  $('clues').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+// --- Step 4: share ---
+function shareStep(clueText) {
   const { rows, cols, blackCells } = detection;
   const title = $('title').value.trim() || 'Scanned Crossword';
-  const xw = buildPuzzle(rows, cols, blackCells, title);
+  const xw = buildPuzzle(rows, cols, blackCells, title, clueText);
   const url = shareUrlFor(xw);
   $('shareLink').value = url;
   $('openBtn').href = url;
   $('result').hidden = false;
-});
+  statusEl.textContent = 'Share the link, or open it directly in the solver.';
+  $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
 $('copyBtn').addEventListener('click', () =>
   navigator.clipboard.writeText($('shareLink').value));
+
+// --- Step 3: clue photo → OCR ---
+let cluesPhotoCanvas = null;      // raw captured clue photo
+let cluesProcessedCanvas = null;  // grayscale/thresholded version OCR runs on
+let clueBoxes = [];               // [{ rect: {x,y,w,h}, direction: 'across'|'down' }]
+let clueBoxDragStart = null;
+let extractedClueText = null;     // { across: {number:text}, down: {number:text} }
+
+$('cluesCamera').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  statusEl.textContent = 'Loading clue photo…';
+  try {
+    const img = new Image();
+    img.src = URL.createObjectURL(file);
+    await img.decode();
+    cluesPhotoCanvas = document.createElement('canvas');
+    const scale = Math.min(1, 1600 / img.naturalWidth);
+    cluesPhotoCanvas.width = Math.round(img.naturalWidth * scale);
+    cluesPhotoCanvas.height = Math.round(img.naturalHeight * scale);
+    cluesPhotoCanvas.getContext('2d').drawImage(img, 0, 0, cluesPhotoCanvas.width, cluesPhotoCanvas.height);
+
+    statusEl.textContent = 'Enhancing image for OCR…';
+    cluesProcessedCanvas = await preprocessForOcr(cluesPhotoCanvas);
+    clueBoxes = [];
+    extractedClueText = null;
+    $('confirmCluesBtn').hidden = true;
+    $('cluesResultList').innerHTML = '';
+    drawCluesCanvas();
+    renderBoxList();
+    statusEl.textContent = 'Drag a box around each column of clue text.';
+  } catch (err) {
+    statusEl.textContent = '⚠️ ' + errMsg(err);
+  }
+});
+
+function drawCluesCanvas() {
+  const canvas = $('cluesCanvas');
+  canvas.width = cluesProcessedCanvas.width;
+  canvas.height = cluesProcessedCanvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(cluesProcessedCanvas, 0, 0);
+  clueBoxes.forEach((box, i) => drawBoxOutline(ctx, box.rect, box.direction, i + 1));
+  if (clueBoxDragStart && clueBoxDragStart.rect) {
+    drawBoxOutline(ctx, clueBoxDragStart.rect, 'across', clueBoxes.length + 1);
+  }
+}
+
+function drawBoxOutline(ctx, rect, direction, label) {
+  ctx.strokeStyle = direction === 'down' ? '#e0a52f' : '#2f6fed';
+  ctx.lineWidth = Math.max(2, ctx.canvas.width / 400);
+  ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.fillStyle = ctx.strokeStyle;
+  ctx.font = `${Math.max(14, ctx.canvas.width / 40)}px sans-serif`;
+  ctx.fillText(String(label), rect.x + 4, rect.y + 18);
+}
+
+function cluesCanvasPoint(e) {
+  const canvas = $('cluesCanvas');
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: Math.min(Math.max((e.clientX - rect.left) * (canvas.width / rect.width), 0), canvas.width),
+    y: Math.min(Math.max((e.clientY - rect.top) * (canvas.height / rect.height), 0), canvas.height),
+  };
+}
+
+$('cluesCanvas').addEventListener('pointerdown', (e) => {
+  if (!cluesProcessedCanvas) return;
+  e.preventDefault();
+  clueBoxDragStart = { start: cluesCanvasPoint(e), rect: null };
+  e.target.setPointerCapture(e.pointerId);
+});
+$('cluesCanvas').addEventListener('pointermove', (e) => {
+  if (!clueBoxDragStart) return;
+  const p = cluesCanvasPoint(e);
+  clueBoxDragStart.rect = {
+    x: Math.round(Math.min(clueBoxDragStart.start.x, p.x)),
+    y: Math.round(Math.min(clueBoxDragStart.start.y, p.y)),
+    w: Math.round(Math.abs(p.x - clueBoxDragStart.start.x)),
+    h: Math.round(Math.abs(p.y - clueBoxDragStart.start.y)),
+  };
+  drawCluesCanvas();
+});
+$('cluesCanvas').addEventListener('pointerup', () => {
+  if (clueBoxDragStart && clueBoxDragStart.rect &&
+      clueBoxDragStart.rect.w >= 20 && clueBoxDragStart.rect.h >= 20) {
+    clueBoxes.push({ rect: clueBoxDragStart.rect, direction: 'across' });
+  }
+  clueBoxDragStart = null;
+  drawCluesCanvas();
+  renderBoxList();
+});
+
+$('undoBoxBtn').addEventListener('click', () => {
+  clueBoxes.pop();
+  drawCluesCanvas();
+  renderBoxList();
+});
+
+function renderBoxList() {
+  const wrap = $('cluesBoxList');
+  wrap.innerHTML = '';
+  clueBoxes.forEach((box, i) => {
+    const row = document.createElement('div');
+    row.className = 'clue-box-row';
+
+    const label = document.createElement('span');
+    label.textContent = `Box ${i + 1}`;
+    row.appendChild(label);
+
+    const select = document.createElement('select');
+    for (const dir of ['across', 'down']) {
+      const opt = document.createElement('option');
+      opt.value = dir;
+      opt.textContent = dir === 'across' ? 'Across' : 'Down';
+      if (box.direction === dir) opt.selected = true;
+      select.appendChild(opt);
+    }
+    select.onchange = () => { box.direction = select.value; drawCluesCanvas(); };
+    row.appendChild(select);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'secondary';
+    removeBtn.textContent = 'Remove';
+    removeBtn.onclick = () => {
+      clueBoxes.splice(i, 1);
+      drawCluesCanvas();
+      renderBoxList();
+    };
+    row.appendChild(removeBtn);
+
+    wrap.appendChild(row);
+  });
+}
+
+$('extractCluesBtn').addEventListener('click', async () => {
+  if (!clueBoxes.length) {
+    statusEl.textContent = 'Draw at least one box around the clue text first.';
+    return;
+  }
+  statusEl.textContent = 'Running OCR… 0%';
+  try {
+    extractedClueText = await recognizeClueBoxes(cluesProcessedCanvas, clueBoxes, (frac) => {
+      statusEl.textContent = `Running OCR… ${Math.round(frac * 100)}%`;
+    });
+    renderClueResults();
+    $('confirmCluesBtn').hidden = false;
+    statusEl.textContent = 'Check the extracted clues below, then continue.';
+  } catch (err) {
+    console.error('OCR failed', err);
+    statusEl.textContent = '⚠️ ' + errMsg(err);
+  }
+});
+
+function renderClueResults() {
+  const wrap = $('cluesResultList');
+  wrap.innerHTML = '';
+  for (const [dirKey, dirLabel] of [['across', 'Across'], ['down', 'Down']]) {
+    const numbers = Object.keys(extractedClueText[dirKey]).sort((a, b) => Number(a) - Number(b));
+    if (!numbers.length) continue;
+    const heading = document.createElement('h3');
+    heading.textContent = dirLabel;
+    wrap.appendChild(heading);
+    for (const num of numbers) {
+      const row = document.createElement('div');
+      row.className = 'clue-edit-row';
+      const label = document.createElement('span');
+      label.textContent = num;
+      row.appendChild(label);
+      const textarea = document.createElement('textarea');
+      textarea.value = extractedClueText[dirKey][num];
+      textarea.oninput = () => { extractedClueText[dirKey][num] = textarea.value; };
+      row.appendChild(textarea);
+      wrap.appendChild(row);
+    }
+  }
+}
+
+$('skipCluesBtn').addEventListener('click', () => shareStep(null));
+$('confirmCluesBtn').addEventListener('click', () => shareStep(extractedClueText));
 
 // PWA registration (same pattern as the solver's index.html)
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');

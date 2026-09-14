@@ -12,7 +12,9 @@
 // Point this at your deployed copy of html5-crossword-solver:
 const SOLVER_BASE = 'https://bumface11.github.io/html5-crossword-solver/index.html';
 
-function buildPuzzle(rows, cols, blackCells, title = 'Scanned Crossword') {
+function buildPuzzle(rows, cols, blackCells, title = 'Scanned Crossword', clueText = null) {
+  const acrossText = (clueText && clueText.across) || {};
+  const downText = (clueText && clueText.down) || {};
   const cells = [];
   const words = [];
   const across = { title: 'Across', clue: [] };
@@ -44,18 +46,19 @@ function buildPuzzle(rows, cols, blackCells, title = 'Scanned Crossword') {
           const wordCells = [];
           for (let cc = c; !isBlock(r, cc); cc++) wordCells.push([cc, r]);
           words.push({ id: cell.number, cells: wordCells });
-          across.clue.push({ word: cell.number, number: cell.number, text: '---' });
+          across.clue.push({ word: cell.number, number: cell.number, text: acrossText[cell.number] || '---' });
         }
         if (startsDown) {
           const wordCells = [];
           for (let rr = r; !isBlock(rr, c); rr++) wordCells.push([c, rr]);
           words.push({ id: cell.number, cells: wordCells });
-          down.clue.push({ word: cell.number, number: cell.number, text: '---' });
+          down.clue.push({ word: cell.number, number: cell.number, text: downText[cell.number] || '---' });
         }
       }
       cells.push(cell);
     }
   }
+
 
   const xw = new JSCrossword(
     {

@@ -1,5 +1,5 @@
 /* global detectGrid, buildPuzzle, buildIpuz, shareUrlFor, whenCvReady, recognizeClueBoxes */
-const APP_BUILD = 'v24 · 2026-10-04';
+const APP_BUILD = 'v25 · 2026-10-05';
 
 let detection = null;
 let photoCanvas = null;   // downscaled source image
@@ -382,14 +382,17 @@ function cornerPoints(rect) {
 }
 
 function handleRadius(canvas) {
-  return Math.max(9, canvas.width / 120);
+  // Canvas pixels per CSS pixel: the photo canvas is scaled down on phones,
+  // so a fixed canvas-pixel radius ends up tiny on screen.
+  const cssScale = canvas.width / (canvas.getBoundingClientRect().width || canvas.width);
+  return 14 * cssScale;
 }
 
 function drawHandles(ctx, corners) {
   const r = handleRadius(ctx.canvas);
-  ctx.fillStyle = '#fff';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
   ctx.strokeStyle = '#2f6fed';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 3 * (r / 14);
   for (const p of Object.values(corners)) {
     ctx.beginPath();
     ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
@@ -398,10 +401,16 @@ function drawHandles(ctx, corners) {
   }
 }
 
+// Touch target is ~28 CSS px in radius; the nearest corner within it wins so
+// overlapping targets on small boxes still pick the closest handle.
 function hitTestHandle(corners, p, canvas) {
-  const r = handleRadius(canvas) * 1.6;   // slightly forgiving hit area for touch
-  return Object.keys(corners).find((key) =>
-    Math.hypot(p.x - corners[key].x, p.y - corners[key].y) <= r) || null;
+  const r = handleRadius(canvas) * 2;
+  let best = null, bestDist = r;
+  for (const key of Object.keys(corners)) {
+    const d = Math.hypot(p.x - corners[key].x, p.y - corners[key].y);
+    if (d <= bestDist) { best = key; bestDist = d; }
+  }
+  return best;
 }
 
 // Even-odd point-in-polygon test against the (possibly non-rectangular) quad.
@@ -529,7 +538,10 @@ $('cluesCanvas').addEventListener('pointerdown', (e) => {
   if (selectedBoxIndex !== null) {
     const corner = hitTestHandle(clueBoxes[selectedBoxIndex].corners, p, canvas);
     if (corner) {
-      resizeState = { index: selectedBoxIndex, corner };
+      const c = clueBoxes[selectedBoxIndex].corners[corner];
+      // Remember where inside the handle the finger landed so the corner
+      // doesn't jump to the fingertip when the drag starts.
+      resizeState = { index: selectedBoxIndex, corner, dx: c.x - p.x, dy: c.y - p.y };
       canvas.setPointerCapture(e.pointerId);
       updateMagnifier(p, e.clientX, e.clientY);
       return;
@@ -553,13 +565,13 @@ $('cluesCanvas').addEventListener('pointermove', (e) => {
   const p = cluesCanvasPoint(e);
 
   if (resizeState) {
-    const { index, corner } = resizeState;
+    const { index, corner, dx, dy } = resizeState;
     // Move only the dragged vertex — the other three corners stay put, so
     // the box can be skewed into an arbitrary quadrilateral, not just resized
     // as a rectangle.
-    clueBoxes[index].corners[corner] = { x: Math.round(p.x), y: Math.round(p.y) };
+    clueBoxes[index].corners[corner] = { x: Math.round(p.x + dx), y: Math.round(p.y + dy) };
     drawCluesCanvas();
-    updateMagnifier(p, e.clientX, e.clientY);
+    updateMagnifier(clueBoxes[index].corners[corner], e.clientX, e.clientY);
     return;
   }
 

@@ -115,6 +115,16 @@ function buildIpuz(rows, cols, blackCells, title = 'Scanned Crossword', clueText
     puzzleGrid.push(row);
   }
 
+  const addUnmatchedClues = (entries, textByNumber) => {
+    const included = new Set(entries.map(([number]) => String(number)));
+    Object.keys(textByNumber)
+      .filter((number) => !included.has(number) && Number.isInteger(Number(number)))
+      .sort((a, b) => Number(a) - Number(b))
+      .forEach((number) => entries.push([Number(number), textByNumber[number]]));
+  };
+  addUnmatchedClues(acrossClues, acrossText);
+  addUnmatchedClues(downClues, downText);
+
   return {
     version: 'http://ipuz.org/v2',
     kind: ['http://ipuz.org/crossword#1'],

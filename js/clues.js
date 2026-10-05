@@ -17,6 +17,29 @@ function getOcrWorker() {
   }
   return ocrWorkerPromise;
 }
+// Flattens uneven lighting (shadows, glare, gradients across the page) by
+// dividing each pixel by a heavily-blurred version of itself, which
+// estimates the local background illumination. This is a cheap stand-in for
+// CLAHE that only needs GaussianBlur/convertTo/divide — all present even in
+// opencv.js builds that omit cv.createCLAHE. Caller owns and must delete
+// the returned Mat.
+function flattenIllumination(cv, gray) {
+  const bg = new cv.Mat();
+  cv.GaussianBlur(gray, bg, new cv.Size(0, 0), gray.cols / 20);
+ 
+  const bgF = new cv.Mat();
+  const grayF = new cv.Mat();
+  const normF = new cv.Mat();
+  const norm = new cv.Mat();
+  gray.convertTo(grayF, cv.CV_32F);
+  bg.convertTo(bgF, cv.CV_32F, 1, 1); // +1 avoids divide-by-zero
+ 
+  cv.divide(grayF, bgF, normF, 255.0);
+  normF.convertTo(norm, cv.CV_8U);
+ 
+  [bg, bgF, grayF, normF].forEach((m) => m.delete());
+  return norm;
+}
 
 // Perspective-warps a (possibly skewed) quadrilateral out of the raw photo
 // into an upright rectangle, then runs a conservative document-OCR pipeline
@@ -47,13 +70,14 @@ async function warpAndEnhanceQuad(sourceCanvas, corners) {
   const denoised = new cv.Mat();
   cv.medianBlur(gray, denoised, 3);
 
-  const contrast = new cv.Mat();
+  let contrast;
   if (typeof cv.createCLAHE === 'function') {
+    contrast = new cv.Mat();
     const clahe = cv.createCLAHE(2, new cv.Size(8, 8));
     clahe.apply(denoised, contrast);
     clahe.delete();
   } else {
-    cv.normalize(denoised, contrast, 0, 255, cv.NORM_MINMAX);
+    contrast = flattenIllumination(cv, denoised);
   }
 
   const scale = contrast.cols < 1600 ? 1600 / contrast.cols : 1;

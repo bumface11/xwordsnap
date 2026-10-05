@@ -1,5 +1,5 @@
-/* global detectGrid, buildPuzzle, buildIpuz, shareUrlFor, whenCvReady, recognizeClueBoxes */
-const APP_BUILD = 'v26 · 2026-10-05';
+/* global detectGrid, buildPuzzle, buildIpuz, gridClueNumbers, shareUrlFor, whenCvReady, recognizeClueBoxes, DEFAULT_SPLIT, splitLinePoints, splitHandlePoint, splitFromPoint */
+const APP_BUILD = 'v29 · 2026-10-05';
 
 let detection = null;
 let photoCanvas = null;   // downscaled source image
@@ -286,6 +286,7 @@ let clueBoxes = [];               // [{ corners: {tl,tr,br,bl: {x,y}}, direction
 let clueBoxDragStart = null;      // { start, rect } while drawing a brand-new box
 let selectedBoxIndex = null;      // box currently showing corner handles
 let resizeState = null;           // { index, corner } while dragging a handle
+let splitDrag = null;             // { index, s0, sp0 } while dragging the number/clue divider
 let extractedClueText = null;     // { across: {number:text}, down: {number:text} }
 
 async function loadCluesPhoto(e) {
@@ -353,15 +354,15 @@ function drawCluesCanvas() {
 function renderCluesScene(ctx, includeHandles) {
   ctx.drawImage(cluesPhotoCanvas, 0, 0);
   clueBoxes.forEach((box, i) => {
-    drawBoxOutline(ctx, box.corners, box.direction, i + 1);
-    if (includeHandles && i === selectedBoxIndex) drawHandles(ctx, box.corners);
+    drawBoxOutline(ctx, box.corners, box.direction, i + 1, box.split);
+    if (includeHandles && i === selectedBoxIndex) drawHandles(ctx, box.corners, box.split);
   });
   if (clueBoxDragStart && clueBoxDragStart.rect) {
     drawBoxOutline(ctx, cornerPoints(clueBoxDragStart.rect), 'across', clueBoxes.length + 1);
   }
 }
 
-function drawBoxOutline(ctx, corners, direction, label) {
+function drawBoxOutline(ctx, corners, direction, label, split) {
   ctx.strokeStyle = direction === 'down' ? '#e0a52f' : '#2f6fed';
   ctx.lineWidth = Math.max(2, ctx.canvas.width / 400);
   ctx.beginPath();
@@ -371,6 +372,18 @@ function drawBoxOutline(ctx, corners, direction, label) {
   ctx.lineTo(corners.bl.x, corners.bl.y);
   ctx.closePath();
   ctx.stroke();
+  if (split !== undefined) {
+    // Dashed divider: text left of it is read as clue numbers.
+    const { top, bottom } = splitLinePoints(corners, split);
+    ctx.save();
+    ctx.strokeStyle = '#e0442f';
+    ctx.setLineDash([ctx.lineWidth * 3, ctx.lineWidth * 2]);
+    ctx.beginPath();
+    ctx.moveTo(top.x, top.y);
+    ctx.lineTo(bottom.x, bottom.y);
+    ctx.stroke();
+    ctx.restore();
+  }
   ctx.fillStyle = ctx.strokeStyle;
   ctx.font = `${Math.max(14, ctx.canvas.width / 40)}px sans-serif`;
   ctx.fillText(String(label), corners.tl.x + 4, corners.tl.y + 18);
@@ -394,9 +407,9 @@ function handleRadius(canvas) {
   return 14 * cssScale;
 }
 
-function drawHandles(ctx, corners) {
+function drawHandles(ctx, corners, split) {
   const r = handleRadius(ctx.canvas);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
   ctx.strokeStyle = '#2f6fed';
   ctx.lineWidth = 3 * (r / 14);
   for (const p of Object.values(corners)) {
@@ -405,6 +418,22 @@ function drawHandles(ctx, corners) {
     ctx.fill();
     ctx.stroke();
   }
+  if (split !== undefined) {
+    const mid = splitHandlePoint(corners, split);
+    ctx.strokeStyle = '#e0442f';
+    ctx.beginPath();
+    ctx.arc(mid.x, mid.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+// The whole divider line is grabbable, not just its handle, since it can be tall.
+function hitTestSplit(corners, split, p, canvas) {
+  const { top, bottom } = splitLinePoints(corners, split);
+  const dx = bottom.x - top.x, dy = bottom.y - top.y;
+  const t = Math.min(1, Math.max(0, ((p.x - top.x) * dx + (p.y - top.y) * dy) / ((dx * dx + dy * dy) || 1)));
+  return Math.hypot(p.x - (top.x + t * dx), p.y - (top.y + t * dy)) <= handleRadius(canvas) * 1.5;
 }
 
 // Touch target is ~28 CSS px in radius; the nearest corner within it wins so
@@ -606,6 +635,7 @@ $('cluesCanvas').addEventListener('pointerdown', (e) => {
   if (cluesPointers.size >= 2) {
     // A second finger turns the touch into pinch-zoom/pan; drop any half-drawn box.
     resizeState = null;
+    splitDrag = null;
     clueBoxDragStart = null;
     hideMagnifier();
     cluesGestureActive = true;
@@ -626,6 +656,13 @@ $('cluesCanvas').addEventListener('pointerdown', (e) => {
       resizeState = { index: selectedBoxIndex, corner, dx: c.x - p.x, dy: c.y - p.y };
       canvas.setPointerCapture(e.pointerId);
       updateMagnifier(p, e.clientX, e.clientY);
+      return;
+    }
+    const box = clueBoxes[selectedBoxIndex];
+    if (hitTestSplit(box.corners, box.split, p, canvas)) {
+      // Track movement relative to where the finger landed so the line doesn't jump.
+      splitDrag = { index: selectedBoxIndex, s0: box.split, sp0: splitFromPoint(box.corners, p) };
+      updateMagnifier(splitHandlePoint(box.corners, box.split), e.clientX, e.clientY);
       return;
     }
   }
@@ -651,6 +688,15 @@ $('cluesCanvas').addEventListener('pointermove', (e) => {
   }
   const p = cluesCanvasPoint(e);
 
+  if (splitDrag) {
+    const box = clueBoxes[splitDrag.index];
+    const s = splitDrag.s0 + splitFromPoint(box.corners, p) - splitDrag.sp0;
+    box.split = Math.min(0.6, Math.max(0.01, s));
+    drawCluesCanvas();
+    updateMagnifier(splitHandlePoint(box.corners, box.split), e.clientX, e.clientY);
+    return;
+  }
+
   if (resizeState) {
     const { index, corner, dx, dy } = resizeState;
     // Move only the dragged vertex — the other three corners stay put, so
@@ -673,6 +719,12 @@ $('cluesCanvas').addEventListener('pointermove', (e) => {
 });
 $('cluesCanvas').addEventListener('pointerup', (e) => {
   if (endCluesPointer(e)) return;
+  if (splitDrag) {
+    splitDrag = null;
+    hideMagnifier();
+    drawCluesCanvas();
+    return;
+  }
   if (resizeState) {
     const corners = clueBoxes[resizeState.index].corners;
     if (quadArea(corners) < 400) {
@@ -691,7 +743,7 @@ $('cluesCanvas').addEventListener('pointerup', (e) => {
       clueBoxDragStart.rect.w >= 20 && clueBoxDragStart.rect.h >= 20) {
     // The box always starts life as a plain rectangle; its four corners
     // become independently draggable afterwards via the handles.
-    clueBoxes.push({ corners: cornerPoints(clueBoxDragStart.rect), direction: 'across' });
+    clueBoxes.push({ corners: cornerPoints(clueBoxDragStart.rect), direction: 'across', split: DEFAULT_SPLIT });
     selectedBoxIndex = clueBoxes.length - 1;
     renderBoxList();
   }
@@ -704,6 +756,7 @@ $('cluesCanvas').addEventListener('pointercancel', (e) => {
   // Touch drags can be cancelled by the OS (e.g. a scroll gesture taking
   // over) — make sure we don't get stuck with a phantom drag or loupe.
   resizeState = null;
+  splitDrag = null;
   clueBoxDragStart = null;
   hideMagnifier();
   drawCluesCanvas();
@@ -761,30 +814,40 @@ function renderBoxList() {
   });
 }
 
+// OCR progress is shown just above the results so it stays visible on re-runs.
+function setCluesStatus(msg) {
+  $('cluesStatus').textContent = msg;
+  statusEl.textContent = msg;
+}
+
 $('extractCluesBtn').addEventListener('click', async () => {
   if (!clueBoxes.length) {
-    statusEl.textContent = 'Draw at least one box around the clue text first.';
+    setCluesStatus('Draw at least one box around the clue text first.');
     return;
   }
-  statusEl.textContent = 'Running OCR… 0%';
+  setCluesStatus('Running OCR… 0%');
   try {
     extractedClueText = await recognizeClueBoxes(cluesPhotoCanvas, clueBoxes, (frac) => {
-      statusEl.textContent = `Running OCR… ${Math.round(frac * 100)}%`;
+      setCluesStatus(`Running OCR… ${Math.round(frac * 100)}%`);
     });
     renderClueResults();
     $('confirmCluesBtn').hidden = false;
-    statusEl.textContent = 'Check the extracted clues below, then continue.';
+    setCluesStatus('Check the extracted clues below, then continue.');
   } catch (err) {
     console.error('OCR failed', err);
-    statusEl.textContent = '⚠️ ' + errMsg(err);
+    setCluesStatus('⚠️ ' + errMsg(err));
   }
 });
 
+// Lists a field for every word in the grid, plus any scanned numbers the
+// grid doesn't have, so nothing OCR found is hidden.
 function renderClueResults() {
   const wrap = $('cluesResultList');
   wrap.innerHTML = '';
+  const gridNumbers = gridClueNumbers(detection.rows, detection.cols, detection.blackCells);
   for (const [dirKey, dirLabel] of [['across', 'Across'], ['down', 'Down']]) {
-    const numbers = Object.keys(extractedClueText[dirKey]).sort((a, b) => Number(a) - Number(b));
+    const numbers = [...new Set([...gridNumbers[dirKey], ...Object.keys(extractedClueText[dirKey])])]
+      .sort((a, b) => Number(a) - Number(b));
     if (!numbers.length) continue;
     const heading = document.createElement('h3');
     heading.textContent = dirLabel;
@@ -796,7 +859,8 @@ function renderClueResults() {
       label.textContent = num;
       row.appendChild(label);
       const textarea = document.createElement('textarea');
-      textarea.value = extractedClueText[dirKey][num];
+      textarea.value = extractedClueText[dirKey][num] || '';
+      textarea.placeholder = 'No clue scanned — type it here';
       textarea.oninput = () => { extractedClueText[dirKey][num] = textarea.value; };
       row.appendChild(textarea);
       wrap.appendChild(row);

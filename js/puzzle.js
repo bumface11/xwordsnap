@@ -79,6 +79,28 @@ function shareUrlFor(xw) {
   return `${SOLVER_BASE}#${encoded}`;
 }
 
+// Clue numbers (as strings) that start an Across and/or Down word, using the
+// same standard numbering as buildPuzzle().
+function gridClueNumbers(rows, cols, blackCells) {
+  const isBlock = (r, c) =>
+    r < 0 || c < 0 || r >= rows || c >= cols || blackCells[r][c];
+  const across = [];
+  const down = [];
+  let clueNum = 1;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (blackCells[r][c]) continue;
+      const startsAcross = isBlock(r, c - 1) && !isBlock(r, c + 1);
+      const startsDown = isBlock(r - 1, c) && !isBlock(r + 1, c);
+      if (!startsAcross && !startsDown) continue;
+      const number = String(clueNum++);
+      if (startsAcross) across.push(number);
+      if (startsDown) down.push(number);
+    }
+  }
+  return { across, down };
+}
+
 // Builds a plain ipuz v2 object (https://www.ipuz.org/) straight from the
 // detected grid, for debugging the structure independent of the solver's
 // own LZ-string encoding. No solution letters are known yet, so the

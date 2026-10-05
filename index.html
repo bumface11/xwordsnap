@@ -14,10 +14,16 @@
   <main id="app">
     <h1>Scan a Crossword</h1>
 
-    <label class="scan-btn">
-      📷 Take a photo of the grid
-      <input id="camera" type="file" accept="image/*" capture="environment" hidden>
-    </label>
+    <div class="btn-row">
+      <label class="scan-btn">
+        📷 Photo of the grid
+        <input id="camera" type="file" accept="image/*" capture="environment" hidden>
+      </label>
+      <label class="scan-btn secondary">
+        🖼 From gallery
+        <input id="galleryInput" type="file" accept="image/*" hidden>
+      </label>
+    </div>
 
     <button id="sampleBtn" class="secondary">🧪 Test with a sample grid</button>
 
@@ -45,16 +51,23 @@
 
     <section id="clues" class="step" hidden>
       <h2><span class="step-num">3</span> Scan the clues</h2>
-      <label class="scan-btn">
-        📷 Take a photo of the clues
-        <input id="cluesCamera" type="file" accept="image/*" capture="environment" hidden>
-      </label>
-      <canvas id="cluesCanvas"></canvas>
+      <div class="btn-row">
+        <label class="scan-btn">
+          📷 Photo of the clues
+          <input id="cluesCamera" type="file" accept="image/*" capture="environment" hidden>
+        </label>
+        <label class="scan-btn secondary">
+          🖼 From gallery
+          <input id="cluesGallery" type="file" accept="image/*" hidden>
+        </label>
+      </div>
+      <div id="cluesViewport"><canvas id="cluesCanvas"></canvas></div>
       <div class="btn-row">
         <button id="cluesRotateBtn" class="secondary" title="Rotate the photo so the clue text reads upright">⟲ Rotate</button>
         <button id="undoBoxBtn" class="secondary">Undo last box</button>
+        <button id="cluesZoomResetBtn" class="secondary">Reset zoom</button>
       </div>
-      <p class="hint">Drag a box around each column of clue text, then drag its corner handles to trace any skew — each box is straightened and enhanced individually before OCR. Choose its direction, then extract. Draw more boxes for more columns.</p>
+      <p class="hint">Pinch to zoom and drag with two fingers to pan. Drag with one finger to draw a box around each column of clue text, then drag its corner handles to trace any skew — each box is straightened and enhanced individually before OCR. Choose its direction, then extract. Draw more boxes for more columns.</p>
       <div id="cluesBoxList"></div>
       <div class="btn-row">
         <button id="extractCluesBtn">Extract clues (OCR)</button>

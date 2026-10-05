@@ -1,5 +1,5 @@
 /* global detectGrid, buildPuzzle, buildIpuz, shareUrlFor, whenCvReady, recognizeClueBoxes */
-const APP_BUILD = 'v25 · 2026-10-05';
+const APP_BUILD = 'v26 · 2026-10-05';
 
 let detection = null;
 let photoCanvas = null;   // downscaled source image
@@ -35,7 +35,7 @@ whenCvReady((fraction) => {
 });
 
 // --- Step 1: get an image (native camera on mobile, file picker on desktop) ---
-$('camera').addEventListener('change', async (e) => {
+async function loadGridPhoto(e) {
   const file = e.target.files[0];
   e.target.value = '';           // allow picking the same file again
   if (!file) return;
@@ -54,7 +54,9 @@ $('camera').addEventListener('change', async (e) => {
   } catch (err) {
     statusEl.textContent = '⚠️ ' + errMsg(err);
   }
-});
+}
+$('camera').addEventListener('change', loadGridPhoto);
+$('galleryInput').addEventListener('change', loadGridPhoto);
 
 // --- Test harness: synthesize a 15×15 grid so the pipeline can be exercised
 // --- without a camera (desktop browser, Codespaces port-forward, etc.) ---
@@ -286,7 +288,7 @@ let selectedBoxIndex = null;      // box currently showing corner handles
 let resizeState = null;           // { index, corner } while dragging a handle
 let extractedClueText = null;     // { across: {number:text}, down: {number:text} }
 
-$('cluesCamera').addEventListener('change', async (e) => {
+async function loadCluesPhoto(e) {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
@@ -305,7 +307,9 @@ $('cluesCamera').addEventListener('change', async (e) => {
   } catch (err) {
     statusEl.textContent = '⚠️ ' + errMsg(err);
   }
-});
+}
+$('cluesCamera').addEventListener('change', loadCluesPhoto);
+$('cluesGallery').addEventListener('change', loadCluesPhoto);
 
 // Resets anything tied to the clue photo's pixel coordinates (drawn boxes,
 // extracted text). No OpenCV work happens here — enhancement is applied per
@@ -316,7 +320,9 @@ function resetCluesUiState() {
   extractedClueText = null;
   $('confirmCluesBtn').hidden = true;
   $('cluesResultList').innerHTML = '';
+  cluesView.scale = 1; cluesView.tx = 0; cluesView.ty = 0;
   drawCluesCanvas();
+  applyCluesView();
   renderBoxList();
 }
 
@@ -520,6 +526,67 @@ function hideMagnifier() {
   if (magnifierEl) magnifierEl.style.display = 'none';
 }
 
+// --- Pinch-zoom / pan on the clues photo ---
+const cluesView = { scale: 1, tx: 0, ty: 0 };
+const cluesPointers = new Map();     // pointerId -> client position
+let cluesGesture = null;             // start state of the current pinch
+let cluesGestureActive = false;      // stays true until every finger lifts
+
+function setCluesView(scale, mid, content) {
+  cluesView.scale = Math.min(Math.max(scale, 1), 8);
+  cluesView.tx = mid.x - content.x * cluesView.scale;
+  cluesView.ty = mid.y - content.y * cluesView.scale;
+  applyCluesView();
+}
+
+function applyCluesView() {
+  const canvas = $('cluesCanvas');
+  const w = $('cluesViewport').clientWidth, h = canvas.offsetHeight;
+  cluesView.tx = Math.min(0, Math.max(w - w * cluesView.scale, cluesView.tx));
+  cluesView.ty = Math.min(0, Math.max(h - h * cluesView.scale, cluesView.ty));
+  canvas.style.transform =
+    `translate(${cluesView.tx}px, ${cluesView.ty}px) scale(${cluesView.scale})`;
+}
+
+function cluesTwoFingers() {
+  const [a, b] = [...cluesPointers.values()];
+  const vp = $('cluesViewport').getBoundingClientRect();
+  return {
+    dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+    mid: { x: (a.x + b.x) / 2 - vp.left, y: (a.y + b.y) / 2 - vp.top },
+  };
+}
+
+function startCluesGesture() {
+  cluesGesture = { ...cluesTwoFingers(), view: { ...cluesView } };
+}
+
+function updateCluesGesture() {
+  const { dist, mid } = cluesTwoFingers();
+  const g = cluesGesture;
+  const content = {
+    x: (g.mid.x - g.view.tx) / g.view.scale,
+    y: (g.mid.y - g.view.ty) / g.view.scale,
+  };
+  setCluesView(g.view.scale * dist / g.dist, mid, content);
+  drawCluesCanvas();   // keeps handle size constant on screen
+}
+
+// Returns true when the event ended part of a pinch/pan and must not finish a draw.
+function endCluesPointer(e) {
+  cluesPointers.delete(e.pointerId);
+  if (cluesPointers.size < 2) cluesGesture = null;
+  if (!cluesGestureActive) return false;
+  if (cluesPointers.size === 0) cluesGestureActive = false;
+  return true;
+}
+
+$('cluesZoomResetBtn').addEventListener('click', () => {
+  cluesView.scale = 1; cluesView.tx = 0; cluesView.ty = 0;
+  applyCluesView();
+  drawCluesCanvas();
+});
+
 function cluesCanvasPoint(e) {
   const canvas = $('cluesCanvas');
   const rect = canvas.getBoundingClientRect();
@@ -533,6 +600,21 @@ $('cluesCanvas').addEventListener('pointerdown', (e) => {
   if (!cluesPhotoCanvas) return;
   e.preventDefault();
   const canvas = e.target;
+  canvas.setPointerCapture(e.pointerId);
+  cluesPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (cluesPointers.size >= 2) {
+    // A second finger turns the touch into pinch-zoom/pan; drop any half-drawn box.
+    resizeState = null;
+    clueBoxDragStart = null;
+    hideMagnifier();
+    cluesGestureActive = true;
+    startCluesGesture();
+    drawCluesCanvas();
+    return;
+  }
+  if (cluesGestureActive) return;
+
   const p = cluesCanvasPoint(e);
 
   if (selectedBoxIndex !== null) {
@@ -562,6 +644,11 @@ $('cluesCanvas').addEventListener('pointerdown', (e) => {
   drawCluesCanvas();
 });
 $('cluesCanvas').addEventListener('pointermove', (e) => {
+  if (cluesPointers.has(e.pointerId)) cluesPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (cluesGestureActive) {
+    if (cluesGesture && cluesPointers.size >= 2) updateCluesGesture();
+    return;
+  }
   const p = cluesCanvasPoint(e);
 
   if (resizeState) {
@@ -584,7 +671,8 @@ $('cluesCanvas').addEventListener('pointermove', (e) => {
   };
   drawCluesCanvas();
 });
-$('cluesCanvas').addEventListener('pointerup', () => {
+$('cluesCanvas').addEventListener('pointerup', (e) => {
+  if (endCluesPointer(e)) return;
   if (resizeState) {
     const corners = clueBoxes[resizeState.index].corners;
     if (quadArea(corners) < 400) {
@@ -611,7 +699,8 @@ $('cluesCanvas').addEventListener('pointerup', () => {
   drawCluesCanvas();
 });
 
-$('cluesCanvas').addEventListener('pointercancel', () => {
+$('cluesCanvas').addEventListener('pointercancel', (e) => {
+  endCluesPointer(e);
   // Touch drags can be cancelled by the OS (e.g. a scroll gesture taking
   // over) — make sure we don't get stuck with a phantom drag or loupe.
   resizeState = null;

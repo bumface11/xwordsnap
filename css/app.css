@@ -77,13 +77,19 @@ h2 { font-size: 1.1rem; margin: 0; }
   touch-action: none;   /* let pointer events drive the crop rect on touch */
 }
 
+#cluesViewport {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #000;
+}
+
 #cluesCanvas {
   width: 100%;
   display: block;
-  border-radius: 8px;
-  background: #000;
+  transform-origin: 0 0;
   cursor: crosshair;
-  touch-action: none;
+  touch-action: none;   /* pinch/pan and box drawing are handled in JS */
 }
 
 .hint {

@@ -263,7 +263,7 @@ function wordsToText(words) {
 // Runs OCR on each box (in the order given) and merges the parsed clues into
 // { across: {number: text}, down: {number: text} }, keyed by the box's
 // user-assigned direction. `sourceCanvas` is the raw (unprocessed) clue
-// photo � each box's quad is perspective-corrected and enhanced individually.
+// photo — each box's quad is perspective-corrected and enhanced individually.
 async function recognizeClueBoxes(sourceCanvas, boxes, onProgress) {
   const acrossText = {};
   const downText = {};

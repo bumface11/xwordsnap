@@ -288,7 +288,7 @@ async function recognizeClueBoxes(sourceCanvas, boxes, onProgress) {
     await emit(at(0.98), `${label}: parsing clues`);
     const bucket = box.direction === 'down' ? downText : acrossText;
     let clues = parseClueWords(words, splitLine);
-    // Nothing found left of the divider � fall back to matching numbers in the plain text.
+    // Nothing found left of the divider — fall back to matching numbers in the plain text.
     if (!clues.length) clues = parseClueLines(wordsToText(words));
     for (const { number, text } of clues) bucket[number] = text;
     if (onProgress) onProgress((i + 1) / boxes.length);

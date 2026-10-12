@@ -21,7 +21,10 @@ function getOcrEngine() {
       const [det, rec, dictText] = await Promise.all([
         ort.InferenceSession.create(OCR_DIR + 'det.onnx', opts),
         ort.InferenceSession.create(OCR_DIR + 'rec.onnx', opts),
-        fetch(OCR_DIR + 'dict.txt').then((r) => r.text()),
+        fetch(OCR_DIR + 'dict.txt').then((r) => {
+          if (!r.ok) throw new Error(`Failed to load OCR dictionary (HTTP ${r.status})`);
+          return r.text();
+        }),
       ]);
       // CTC classes: index 0 is blank, then the dictionary, then a space.
       const chars = ['', ...dictText.split(/\r?\n/).filter((l) => l.length), ' '];
@@ -32,13 +35,13 @@ function getOcrEngine() {
   return ocrEnginePromise;
 }
 
-// RGBA Mat -> normalized planar RGB float tensor data.
+// RGBA Mat -> normalized planar BGR float tensor data.
 function toPlanar(rgba, mean, std) {
   const { cols: w, rows: h, data } = rgba;
   const out = new Float32Array(3 * w * h);
   const plane = w * h;
   for (let i = 0; i < plane; i++) {
-    for (let c = 0; c < 3; c++) out[c * plane + i] = (data[i * 4 + c] / 255 - mean[c]) / std[c];
+    for (let c = 0; c < 3; c++) out[c * plane + i] = (data[i * 4 + (2 - c)] / 255 - mean[c]) / std[c];
   }
   return out;
 }
@@ -80,10 +83,10 @@ async function detectTextBoxes(canvas) {
     // DB predicts a shrunken kernel; unclip by area * ratio / perimeter.
     const d = (r.width * r.height * DET_UNCLIP_RATIO) / (2 * (r.width + r.height));
     boxes.push({
-      x0: Math.max(0, (r.x - d) / scale),
-      y0: Math.max(0, (r.y - d) / scale),
-      x1: Math.min(src.cols, (r.x + r.width + d) / scale),
-      y1: Math.min(src.rows, (r.y + r.height + d) / scale),
+      x0: Math.max(0, (r.x - d) * src.cols / w),
+      y0: Math.max(0, (r.y - d) * src.rows / h),
+      x1: Math.min(src.cols, (r.x + r.width + d) * src.cols / w),
+      y1: Math.min(src.rows, (r.y + r.height + d) * src.rows / h),
     });
   }
   [src, resized, mask, contours, hierarchy].forEach((m) => m.delete());

@@ -11,7 +11,6 @@
   "dependencies": {
     "@techstark/opencv-js": "5.0.0-release.1",
     "html5-crossword-solver": "github:bumface11/html5-crossword-solver#ca6671451f452b9b069eee46da3eab851a03de7d",
-    "tesseract.js": "^7.0.0",
-    "tesseract.js-core": "^7.0.0"
+    "onnxruntime-web": "^1.30.0"
   }
 }

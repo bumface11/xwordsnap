@@ -1,5 +1,5 @@
 /* global detectGrid, buildPuzzle, buildIpuz, gridClueNumbers, shareUrlFor, whenCvReady, recognizeClueBoxes, DEFAULT_SPLIT, splitLinePoints, splitHandlePoint, splitFromPoint */
-const APP_BUILD = 'v29 · 2026-10-05';
+const APP_BUILD = 'v31 · 2026-10-11';
 
 let detection = null;
 let photoCanvas = null;   // downscaled source image
@@ -827,8 +827,8 @@ $('extractCluesBtn').addEventListener('click', async () => {
   }
   setCluesStatus('Running OCR… 0%');
   try {
-    extractedClueText = await recognizeClueBoxes(cluesPhotoCanvas, clueBoxes, (frac) => {
-      setCluesStatus(`Running OCR… ${Math.round(frac * 100)}%`);
+    extractedClueText = await recognizeClueBoxes(cluesPhotoCanvas, clueBoxes,     (frac, msg) => {
+          setCluesStatus(`Running OCR… ${Math.round(frac * 100)}%${msg ? ' — ' + msg : ''}`);
     });
     renderClueResults();
     $('confirmCluesBtn').hidden = false;

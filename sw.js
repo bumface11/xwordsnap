@@ -1,11 +1,10 @@
-const CACHE_NAME = 'xwordsnap-v29'; // bump on every deploy (same rule as the solver)
+const CACHE_NAME = 'xwordsnap-v31'; // bump on every deploy (same rule as the solver)
 const ASSETS = [
   './', './index.html', './manifest.json', './css/app.css',
   './js/app.js', './js/detect.js', './js/puzzle.js', './js/clues.js',
   './lib/jscrossword_combined.js', './lib/opencv.js',
-  './lib/tesseract.min.js', './lib/worker.min.js',
-  './lib/tesseract-core-lstm.wasm.js', './lib/tesseract-core-simd-lstm.wasm.js',
-  './lib/tesseract-core-relaxedsimd-lstm.wasm.js', './lib/eng.traineddata.gz',
+  './js/ocr.js', './lib/ort.wasm.min.js', './lib/ort-wasm-simd-threaded.mjs',
+  './lib/ort-wasm-simd-threaded.wasm', './lib/ocr/det.onnx', './lib/ocr/rec.onnx', './lib/ocr/dict.txt',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-512-maskable.png'
 ];
 

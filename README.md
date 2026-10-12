@@ -12,6 +12,7 @@ Libraries are pinned in `package.json` / `package-lock.json` and copied into
 `lib/` by `scripts/vendor.js` (runs on `postinstall`):
 
 - `@techstark/opencv-js` — grid detection pipeline (port of xwordscan steps 1–5)
+- `onnxruntime-web` + PP-OCR (PaddleOCR) ONNX models � offline clue OCR (`lib/ocr/`, fetched by `npm run vendor`)
 - `html5-crossword-solver` (git, pinned commit) — `JSCrossword` serialization for share URLs
 
 ## Layout

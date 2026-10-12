@@ -1,22 +1,7 @@
-/* global Tesseract, whenCvReady */
+/* global whenCvReady, detectTextBoxes, recognizeTextBox */
 // Step 3 support: perspective-correct each user-drawn quadrilateral against
-// the raw clue photo, enhance it for OCR, run Tesseract, and parse the
+// the raw clue photo, enhance it for OCR, run PP-OCR, and parse the
 // recognized text into clue numbers.
-
-let ocrWorkerPromise = null;
-
-// Lazily create a single Tesseract worker, pointed at the locally vendored
-// core/worker/language files so the app keeps working offline.
-function getOcrWorker() {
-  if (!ocrWorkerPromise) {
-    ocrWorkerPromise = Tesseract.createWorker('eng', 1, {
-      workerPath: 'lib/worker.min.js',
-      corePath: 'lib/',
-      langPath: 'lib',
-    });
-  }
-  return ocrWorkerPromise;
-}
 
 // Where the clue numbers end, as a fraction of the box width from its left edge.
 const DEFAULT_SPLIT = 0.05;
@@ -127,23 +112,15 @@ async function warpAndEnhanceQuad(sourceCanvas, corners, split = DEFAULT_SPLIT) 
     contrast.copyTo(resized);
   }
 
-  const binary = new cv.Mat();
-  cv.adaptiveThreshold(resized, binary, 255,
-    cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 25, 15);
-
-  const clean = new cv.Mat();
-  const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2, 2));
-  cv.morphologyEx(binary, clean, cv.MORPH_OPEN, kernel);
-
   const padded = new cv.Mat();
-  cv.copyMakeBorder(clean, padded, 20, 20, 20, 20, cv.BORDER_CONSTANT, new cv.Scalar(255));
+  cv.copyMakeBorder(resized, padded, 20, 20, 20, 20, cv.BORDER_CONSTANT, new cv.Scalar(255));
 
   const out = document.createElement('canvas');
   out.width = padded.cols;
   out.height = padded.rows;
   cv.imshow(out, padded);
 
-  [src, srcPts, dstPts, transform, warped, gray, denoised, contrast, resized, binary, clean, kernel, padded]
+  [src, srcPts, dstPts, transform, warped, gray, denoised, contrast, resized, padded]
     .forEach((m) => m.delete());
   // Same upscale and 20px padding the pipeline applied above.
   const toFinal = (p) => ({ x: p.x * scale + 20, y: p.y * scale + 20 });
@@ -184,23 +161,6 @@ function parseClueLines(rawText) {
   }
   if (current) clues.push(finish(current));
   return clues;
-}
-
-// Flattens Tesseract's blocks > paragraphs > lines > words tree into words
-// with their pixel boxes.
-function wordsFromBlocks(blocks) {
-  const words = [];
-  for (const block of blocks || []) {
-    for (const para of block.paragraphs || []) {
-      for (const line of para.lines || []) {
-        for (const w of line.words || []) {
-          const text = (w.text || '').trim();
-          if (text) words.push({ text, x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 });
-        }
-      }
-    }
-  }
-  return words;
 }
 
 // A token left of the divider should be a clue number, so common digit
@@ -260,23 +220,76 @@ function parseClueWords(words, splitLine) {
     .map((c) => ({ number: c.number, text: c.parts.join(' ').replace(/\s+/g, ' ').trim() }));
 }
 
+// Detects text lines with PP-OCR and recognizes them. Any line crossing the
+// number/clue divider is cut there so numbers and clue text are read apart.
+async function ocrWords(canvas, splitLine, report) {
+  const { top, bottom } = splitLine;
+  await report(0, 'finding text lines');
+  const dy = bottom.y - top.y;
+  const dividerX = (y) => (dy ? top.x + (bottom.x - top.x) * (y - top.y) / dy : top.x);
+  const parts = [];
+  for (const b of await detectTextBoxes(canvas)) {
+    const dx = dividerX((b.y0 + b.y1) / 2);
+    const minW = (b.y1 - b.y0) * 0.5;
+    if (b.x0 < dx - minW && b.x1 > dx + minW) {
+      parts.push({ ...b, x1: dx }, { ...b, x0: dx });
+    } else {
+      parts.push(b);
+    }
+  }
+  const words = [];
+  for (let i = 0; i < parts.length; i++) {
+    const b = parts[i];
+    await report(0.2 + 0.8 * (i / parts.length), `reading line ${i + 1} of ${parts.length}`);
+    const text = await recognizeTextBox(canvas, b);
+    if (text) words.push({ text, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1 });
+  }
+  return words;
+}
+
+// Plain top-to-bottom text of the recognized words, for the line-based fallback.
+function wordsToText(words) {
+  const sorted = [...words].sort((a, b) => (a.y0 + a.y1) - (b.y0 + b.y1));
+  const lines = [];
+  for (const w of sorted) {
+    const last = lines[lines.length - 1];
+    const yc = (w.y0 + w.y1) / 2;
+    if (last && yc <= last.y1) last.words.push(w);
+    else lines.push({ y1: w.y1, words: [w] });
+  }
+  return lines.map((l) => l.words.sort((a, b) => a.x0 - b.x0).map((w) => w.text).join(' ')).join('\n');
+}
+
 // Runs OCR on each box (in the order given) and merges the parsed clues into
 // { across: {number: text}, down: {number: text} }, keyed by the box's
 // user-assigned direction. `sourceCanvas` is the raw (unprocessed) clue
-// photo — each box's quad is perspective-corrected and enhanced individually.
+// photo � each box's quad is perspective-corrected and enhanced individually.
 async function recognizeClueBoxes(sourceCanvas, boxes, onProgress) {
-  const worker = await getOcrWorker();
   const acrossText = {};
   const downText = {};
+  // The WASM work blocks the main thread, so yield after each report to let
+  // the status text actually paint.
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const emit = async (frac, msg) => {
+    if (onProgress) onProgress(frac, msg);
+    await tick();
+  };
+  await emit(0, 'loading OCR models (first run is slower)');
+  await getOcrEngine();
   for (let i = 0; i < boxes.length; i++) {
     const box = boxes[i];
+    const label = `box ${i + 1} of ${boxes.length}`;
+    const at = (f) => (i + f) / boxes.length;
+    await emit(at(0), `${label}: straightening and enhancing`);
     const { canvas, splitLine } = await warpAndEnhanceQuad(
       sourceCanvas, box.corners, box.split ?? DEFAULT_SPLIT);
-    const { data } = await worker.recognize(canvas, {}, { text: true, blocks: true });
+    const words = await ocrWords(canvas, splitLine,
+      (f, msg) => emit(at(0.1 + 0.9 * f), `${label}: ${msg}`));
+    await emit(at(0.98), `${label}: parsing clues`);
     const bucket = box.direction === 'down' ? downText : acrossText;
-    let clues = parseClueWords(wordsFromBlocks(data.blocks), splitLine);
-    // Nothing found left of the divider — fall back to matching numbers in the plain text.
-    if (!clues.length) clues = parseClueLines(data.text);
+    let clues = parseClueWords(words, splitLine);
+    // Nothing found left of the divider � fall back to matching numbers in the plain text.
+    if (!clues.length) clues = parseClueLines(wordsToText(words));
     for (const { number, text } of clues) bucket[number] = text;
     if (onProgress) onProgress((i + 1) / boxes.length);
   }

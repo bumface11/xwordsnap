@@ -88,39 +88,25 @@ async function warpAndEnhanceQuad(sourceCanvas, corners, split = DEFAULT_SPLIT) 
   cv.warpPerspective(src, warped, transform, new cv.Size(width, height),
     cv.INTER_CUBIC, cv.BORDER_REPLICATE, new cv.Scalar());
 
-  const gray = new cv.Mat();
-  cv.cvtColor(warped, gray, cv.COLOR_RGBA2GRAY);
-
-  const denoised = new cv.Mat();
-  cv.medianBlur(gray, denoised, 3);
-
-  let contrast;
-  if (typeof cv.createCLAHE === 'function') {
-    contrast = new cv.Mat();
-    const clahe = cv.createCLAHE(2, new cv.Size(8, 8));
-    clahe.apply(denoised, contrast);
-    clahe.delete();
-  } else {
-    contrast = flattenIllumination(cv, denoised);
-  }
-
-  const scale = contrast.cols < 1600 ? 1600 / contrast.cols : 1;
+  // PP-OCR works best on the natural image, so no blur/contrast filtering;
+  // only upscale genuinely small crops.
+  const scale = warped.cols < 1000 ? Math.min(2, 1000 / warped.cols) : 1;
   const resized = new cv.Mat();
   if (scale > 1) {
-    cv.resize(contrast, resized, new cv.Size(0, 0), scale, scale, cv.INTER_CUBIC);
+    cv.resize(warped, resized, new cv.Size(0, 0), scale, scale, cv.INTER_CUBIC);
   } else {
-    contrast.copyTo(resized);
+    warped.copyTo(resized);
   }
 
   const padded = new cv.Mat();
-  cv.copyMakeBorder(resized, padded, 20, 20, 20, 20, cv.BORDER_CONSTANT, new cv.Scalar(255));
+  cv.copyMakeBorder(resized, padded, 20, 20, 20, 20, cv.BORDER_CONSTANT, new cv.Scalar(255, 255, 255, 255));
 
   const out = document.createElement('canvas');
   out.width = padded.cols;
   out.height = padded.rows;
   cv.imshow(out, padded);
 
-  [src, srcPts, dstPts, transform, warped, gray, denoised, contrast, resized, padded]
+  [src, srcPts, dstPts, transform, warped, resized, padded]
     .forEach((m) => m.delete());
   // Same upscale and 20px padding the pipeline applied above.
   const toFinal = (p) => ({ x: p.x * scale + 20, y: p.y * scale + 20 });

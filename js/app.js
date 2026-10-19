@@ -299,7 +299,7 @@ async function loadCluesPhoto(e) {
     img.src = URL.createObjectURL(file);
     await img.decode();
     cluesPhotoCanvas = document.createElement('canvas');
-    const scale = Math.min(1, 1600 / img.naturalWidth);
+    const scale = Math.min(1, 2400 / img.naturalWidth);
     cluesPhotoCanvas.width = Math.round(img.naturalWidth * scale);
     cluesPhotoCanvas.height = Math.round(img.naturalHeight * scale);
     cluesPhotoCanvas.getContext('2d').drawImage(img, 0, 0, cluesPhotoCanvas.width, cluesPhotoCanvas.height);

@@ -4,7 +4,7 @@
 // recognition is the PP-OCRv3 English CTC model.
 
 const OCR_DIR = 'lib/ocr/';
-const DET_MAX_SIDE = 1280;
+const DET_MAX_SIDE = 2560;
 const DET_THRESH = 0.3;
 const DET_BOX_THRESH = 0.5;
 const DET_UNCLIP_RATIO = 1.6;
@@ -107,7 +107,8 @@ async function recognizeTextBox(canvas, box) {
   const crop = src.roi(new cv.Rect(x0, y0, x1 - x0, y1 - y0));
   const rw = Math.min(2048, Math.max(16, Math.ceil(REC_HEIGHT * (x1 - x0) / (y1 - y0))));
   const resized = new cv.Mat();
-  cv.resize(crop, resized, new cv.Size(rw, REC_HEIGHT), 0, 0, cv.INTER_LINEAR);
+  cv.resize(crop, resized, new cv.Size(rw, REC_HEIGHT), 0, 0,
+    (y1 - y0) > REC_HEIGHT ? cv.INTER_AREA : cv.INTER_CUBIC);
   const input = new ort.Tensor('float32',
     toPlanar(resized, [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]), [1, 3, REC_HEIGHT, rw]);
   [src, crop, resized].forEach((m) => m.delete());

@@ -1,5 +1,5 @@
 /* global detectGrid, buildPuzzle, buildIpuz, gridClueNumbers, shareUrlFor, whenCvReady, recognizeClueBoxes, DEFAULT_SPLIT, splitLinePoints, splitHandlePoint, splitFromPoint */
-const APP_BUILD = 'v31 · 2026-10-11';
+const APP_BUILD = 'v32 · 2026-10-19';
 
 let detection = null;
 let photoCanvas = null;   // downscaled source image
@@ -299,7 +299,7 @@ async function loadCluesPhoto(e) {
     img.src = URL.createObjectURL(file);
     await img.decode();
     cluesPhotoCanvas = document.createElement('canvas');
-    const scale = Math.min(1, 1600 / img.naturalWidth);
+    const scale = Math.min(1, 2400 / img.naturalWidth);
     cluesPhotoCanvas.width = Math.round(img.naturalWidth * scale);
     cluesPhotoCanvas.height = Math.round(img.naturalHeight * scale);
     cluesPhotoCanvas.getContext('2d').drawImage(img, 0, 0, cluesPhotoCanvas.width, cluesPhotoCanvas.height);

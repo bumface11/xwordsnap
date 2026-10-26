@@ -63,16 +63,18 @@
       </div>
       <div id="cluesViewport"><canvas id="cluesCanvas"></canvas></div>
       <div class="btn-row">
+        <button id="autoBoxesBtn" title="Find the Across and Down columns and the number column automatically">Auto-detect columns</button>
         <button id="cluesRotateBtn" class="secondary" title="Rotate the photo so the clue text reads upright">⟲ Rotate</button>
         <button id="undoBoxBtn" class="secondary">Undo last box</button>
         <button id="cluesZoomResetBtn" class="secondary">Reset zoom</button>
       </div>
-      <p class="hint">Pinch to zoom and drag with two fingers to pan. Drag with one finger to draw a box around each column of clue text, then drag its corner handles to trace any skew — each box is straightened and enhanced individually before OCR. Drag the red dashed line (or its handle) so only the clue numbers are to its left; each number there starts a new clue. Choose its direction, then extract. Draw more boxes for more columns.</p>
+      <p class="hint">Tap “Auto-detect columns” to find the Across and Down blocks and their number columns, then adjust if needed. Pinch to zoom and drag with two fingers to pan. Or drag with one finger to draw a box around each column of clue text, then drag its corner handles to trace any skew — each box is straightened and enhanced individually before OCR. Drag the red dashed line (or its handle) so only the clue numbers are to its left; each number there starts a new clue. Choose its direction, then extract. Draw more boxes for more columns.</p>
       <div id="cluesBoxList"></div>
       <div class="btn-row">
         <button id="extractCluesBtn">Extract clues (OCR)</button>
       </div>
       <p id="cluesStatus" class="hint" role="status"></p>
+      <progress id="cluesProgress" max="1" hidden></progress>
       <div id="cluesResultList"></div>
       <div class="btn-row">
         <button id="skipCluesBtn" class="secondary">Skip clues</button>
@@ -96,6 +98,7 @@
   <script src="js/puzzle.js"></script>
   <script src="js/ocr.js"></script>
   <script src="js/clues.js"></script>
+  <script src="js/autoboxes.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

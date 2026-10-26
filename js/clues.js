@@ -178,7 +178,7 @@ function parseClueWords(words, splitLine) {
       const number = numberFromToken(w.text);
       if (number) clues.push({ number, yc, parts: [] });
     } else {
-      textWords.push({ ...w, yc });
+      textWords.push({ ...w, yc: w.yl ?? yc });
     }
   }
   clues.sort((a, b) => a.yc - b.yc);
@@ -195,19 +195,144 @@ function parseClueWords(words, splitLine) {
     }
   }
 
+  // A clue ends with its enumeration, e.g. "(6,5)" (OCR may drop the closing
+  // bracket). Text after that with no number of its own belongs to a clue whose
+  // number was missed, so it must not be glued onto the clue above.
+  const endsClue = (s) => /\(\s*\d+(?:[\s,.'’-]+\d+)*\s*\)?\s*[.,]?\s*$/.test(s);
   for (const line of lines) {
     let owner = null;
     for (const c of clues) if (c.yc <= line.yc + tol) owner = c;
     if (!owner) continue;
-    owner.parts.push(line.words.sort((a, b) => a.x0 - b.x0).map((w) => w.text).join(' '));
+    const lineText = line.words.sort((a, b) => a.x0 - b.x0).map((w) => w.text).join(' ');
+    if (owner.closed) {
+      continue;
+    }
+    owner.parts.push(lineText);
+    if (endsClue(lineText)) owner.closed = true;
   }
   return clues
     .filter((c) => c.parts.length)
-    .map((c) => ({ number: c.number, text: c.parts.join(' ').replace(/\s+/g, ' ').trim() }));
+    .map((c) => ({ number: c.number, yc: c.yc, text: c.parts.join(' ').replace(/\s+/g, ' ').trim() }));
+}
+
+// Straightened box images and where each scanned clue sits in them, so the
+// review step can show the area where a missing clue should be.
+let lastClueScan = { across: [], down: [] };
+
+// Crops the straightened image where clue `num` should be, guessed from the
+// scanned clues either side of it. `numbers` is the full sorted number list.
+function missingClueSnippet(dirKey, num, numbers) {
+  const idx = numbers.indexOf(num);
+  const entries = lastClueScan[dirKey] || [];
+  const posOf = (e, n) => (e.ys[n] === undefined ? null : e.ys[n]);
+  for (const e of entries) {
+    let a = null;
+    let b = null;
+    for (let i = idx - 1; i >= 0 && a === null; i--) if (posOf(e, numbers[i]) !== null) a = i;
+    for (let i = idx + 1; i < numbers.length && b === null; i++) if (posOf(e, numbers[i]) !== null) b = i;
+    if (a === null && b === null) continue;
+    const h = e.h;
+    let top;
+    let bottom;
+    if (a !== null && b !== null) {
+      const ya = e.ys[numbers[a]];
+      const yb = e.ys[numbers[b]];
+      const slots = b - a;
+      const step = (yb - ya) / slots;
+      const centre = ya + step * (idx - a);
+      top = centre - Math.max(step * 0.6, 1.8 * h);
+      bottom = centre + Math.max(step * 0.6, 1.8 * h);
+    } else if (a !== null) {
+      top = e.ys[numbers[a]] + h * 0.5;
+      bottom = top + 4 * h;
+    } else {
+      bottom = e.ys[numbers[b]] - h * 0.5;
+      top = bottom - 4 * h;
+    }
+    top = Math.max(0, Math.floor(top));
+    bottom = Math.min(e.canvas.height, Math.ceil(bottom));
+    if (bottom - top < 8) continue;
+    const out = document.createElement('canvas');
+    out.width = e.canvas.width;
+    out.height = bottom - top;
+    out.getContext('2d').drawImage(e.canvas, 0, top, out.width, out.height, 0, 0, out.width, out.height);
+    return out;
+  }
+  return null;
+}
+
+// Vertical centre of the ink in the first few ems of a line box. A sloping
+// line's box centre sits lower than its start, so the start is what should be
+// compared with the clue number on the left.
+function leftInkY(canvas, b) {
+  const x0 = Math.max(0, Math.floor(b.x0));
+  const y0 = Math.max(0, Math.floor(b.y0));
+  const h = Math.min(canvas.height, Math.ceil(b.y1)) - y0;
+  const w = Math.min(canvas.width, Math.ceil(b.x1), x0 + Math.round(4 * h)) - x0;
+  if (w < 3 || h < 3) return (b.y0 + b.y1) / 2;
+  const data = canvas.getContext('2d').getImageData(x0, y0, w, h).data;
+  let sum = 0;
+  let n = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      if (data[i] * 0.3 + data[i + 1] * 0.59 + data[i + 2] * 0.11 < 110) { sum += y; n++; }
+    }
+  }
+  return n ? y0 + sum / n : (b.y0 + b.y1) / 2;
+}
+
+// Splits a text-line box wherever the upper part of the line (above the
+// baseline, so a "fill-in" underline doesn't count) is blank for more than
+// ~3 ems. Returns [{x0,x1,gapBefore}] plus whether a gap trails the last piece.
+function splitAtGaps(canvas, b, dividerLeft) {
+  const x0 = Math.max(0, Math.floor(b.x0));
+  const x1 = Math.min(canvas.width, Math.ceil(b.x1));
+  const y0 = Math.max(0, Math.floor(b.y0));
+  const y1 = Math.min(canvas.height, Math.ceil(b.y1));
+  const w = x1 - x0;
+  const h = y1 - y0;
+  if (w < 4 || h < 4) return { pieces: [{ x0: b.x0, x1: b.x1, gapBefore: false }], gapAfter: false };
+  const minGap = 2.25 * h;
+  const rows = Math.max(1, Math.floor(h * 0.62));
+  const data = canvas.getContext('2d').getImageData(x0, y0, w, rows).data;
+  const inked = new Uint8Array(w);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      if (data[i] * 0.3 + data[i + 1] * 0.59 + data[i + 2] * 0.11 < 110) inked[x] = 1;
+    }
+  }
+  const pieces = [];
+  let start = -1;
+  let blank = 0;
+  let gapBefore = x0 - dividerLeft > minGap;
+  let lastInk = -1;
+  for (let x = 0; x < w; x++) {
+    if (inked[x]) {
+      if (start < 0) {
+        start = x;
+        if (x > minGap && pieces.length === 0) gapBefore = true;
+      } else if (blank > minGap) {
+        pieces.push({ x0: x0 + start, x1: x0 + lastInk + 1, gapBefore });
+        start = x;
+        gapBefore = true;
+      }
+      blank = 0;
+      lastInk = x;
+    } else {
+      blank++;
+    }
+  }
+  if (start < 0) return { pieces: [], gapAfter: false };
+  pieces.push({ x0: x0 + start, x1: x0 + lastInk + 1, gapBefore });
+  return { pieces, gapAfter: w - 1 - lastInk > minGap };
 }
 
 // Detects text lines with PP-OCR and recognizes them. Any line crossing the
 // number/clue divider is cut there so numbers and clue text are read apart.
+// Clue text lines are also cut at long blanks (fill-in gaps) and the gap is
+// written as ____ in the transcription.
 async function ocrWords(canvas, splitLine, report) {
   const { top, bottom } = splitLine;
   await report(0, 'finding text lines');
@@ -227,8 +352,22 @@ async function ocrWords(canvas, splitLine, report) {
   for (let i = 0; i < parts.length; i++) {
     const b = parts[i];
     await report(0.2 + 0.8 * (i / parts.length), `reading line ${i + 1} of ${parts.length}`);
-    const text = await recognizeTextBox(canvas, b);
-    if (text) words.push({ text, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1 });
+    const dx = dividerX((b.y0 + b.y1) / 2);
+    let text;
+    if ((b.x0 + b.x1) / 2 < dx) {
+      text = await recognizeTextBox(canvas, b);
+    } else {
+      const { pieces, gapAfter } = splitAtGaps(canvas, b, dx);
+      const out = [];
+      for (const p of pieces) {
+        const t = await recognizeTextBox(canvas, { ...b, x0: p.x0 - 2, x1: p.x1 + 2 });
+        if (p.gapBefore && out[out.length - 1] !== '____') out.push('____');
+        if (t) out.push(t);
+      }
+      if (out.length && gapAfter && out[out.length - 1] !== '____') out.push('____');
+      text = out.join(' ');
+    }
+    if (text) words.push({ text, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, yl: leftInkY(canvas, b) });
   }
   return words;
 }
@@ -253,6 +392,8 @@ function wordsToText(words) {
 async function recognizeClueBoxes(sourceCanvas, boxes, onProgress) {
   const acrossText = {};
   const downText = {};
+  const scan = { across: [], down: [] };
+  lastClueScan = scan;
   // The WASM work blocks the main thread, so yield after each report to let
   // the status text actually paint.
   const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -277,6 +418,10 @@ async function recognizeClueBoxes(sourceCanvas, boxes, onProgress) {
     // Nothing found left of the divider — fall back to matching numbers in the plain text.
     if (!clues.length) clues = parseClueLines(wordsToText(words));
     for (const { number, text } of clues) bucket[number] = text;
+    const hs = words.map((w) => w.y1 - w.y0).sort((x, y) => x - y);
+    const ys = {};
+    for (const c of clues) if (c.yc !== undefined) ys[c.number] = c.yc;
+    scan[box.direction === 'down' ? 'down' : 'across'].push({ canvas, ys, h: hs[hs.length >> 1] || 20 });
     if (onProgress) onProgress((i + 1) / boxes.length);
   }
   return { across: acrossText, down: downText };

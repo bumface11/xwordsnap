@@ -1,5 +1,5 @@
 /* global detectGrid, buildPuzzle, buildIpuz, gridClueNumbers, shareUrlFor, whenCvReady, recognizeClueBoxes, DEFAULT_SPLIT, splitLinePoints, splitHandlePoint, splitFromPoint */
-const APP_BUILD = 'v32 · 2026-10-19';
+const APP_BUILD = 'v37 · 2026-10-26';
 
 let detection = null;
 let photoCanvas = null;   // downscaled source image
@@ -339,6 +339,37 @@ $('cluesRotateBtn').addEventListener('click', () => {
   ctx.drawImage(cluesPhotoCanvas, -cluesPhotoCanvas.width / 2, -cluesPhotoCanvas.height / 2);
   cluesPhotoCanvas = rotated;
   resetCluesUiState();
+});
+
+$('autoBoxesBtn').addEventListener('click', async () => {
+  if (!cluesPhotoCanvas) {
+    setCluesStatus('Take or choose a clue photo first.');
+    return;
+  }
+  const started = Date.now();
+  let step = 0;
+  setCluesStatus('Detecting clue columns… (first run loads the OCR models)', null);
+  try {
+    const result = await autoDetectClueBoxes(cluesPhotoCanvas, (msg) => {
+      step++;
+      const secs = Math.round((Date.now() - started) / 1000);
+      setCluesStatus(`Detecting clue columns… step ${step}: ${msg} (${secs}s)`, null);
+    });
+    if (!result) {
+      setCluesStatus('Could not find the Across and Down columns — draw the boxes by hand.');
+      return;
+    }
+    cluesPhotoCanvas = result.canvas;
+    resetCluesUiState();
+    clueBoxes = result.boxes;
+    selectedBoxIndex = 0;
+    drawCluesCanvas();
+    renderBoxList();
+    setCluesStatus('Columns found — adjust the corners or red divider if needed, then extract.');
+  } catch (err) {
+    console.error('Auto-detect failed', err);
+    setCluesStatus('⚠️ ' + errMsg(err));
+  }
 });
 
 function drawCluesCanvas() {
@@ -815,9 +846,17 @@ function renderBoxList() {
 }
 
 // OCR progress is shown just above the results so it stays visible on re-runs.
-function setCluesStatus(msg) {
+function setCluesStatus(msg, fraction) {
   $('cluesStatus').textContent = msg;
   statusEl.textContent = msg;
+  const bar = $('cluesProgress');
+  if (fraction === undefined) {
+    bar.hidden = true;
+  } else {
+    bar.hidden = false;
+    if (fraction === null) bar.removeAttribute('value');
+    else bar.value = fraction;
+  }
 }
 
 $('extractCluesBtn').addEventListener('click', async () => {
@@ -825,10 +864,10 @@ $('extractCluesBtn').addEventListener('click', async () => {
     setCluesStatus('Draw at least one box around the clue text first.');
     return;
   }
-  setCluesStatus('Running OCR… 0%');
+  setCluesStatus('Running OCR… 0%', 0);
   try {
     extractedClueText = await recognizeClueBoxes(cluesPhotoCanvas, clueBoxes,     (frac, msg) => {
-          setCluesStatus(`Running OCR… ${Math.round(frac * 100)}%${msg ? ' — ' + msg : ''}`);
+          setCluesStatus(`Running OCR… ${Math.round(frac * 100)}%${msg ? ' — ' + msg : ''}`, frac);
     });
     renderClueResults();
     $('confirmCluesBtn').hidden = false;
@@ -855,6 +894,12 @@ function renderClueResults() {
     for (const num of numbers) {
       const row = document.createElement('div');
       row.className = 'clue-edit-row';
+      const missing = !extractedClueText[dirKey][num];
+      const snippet = missing ? missingClueSnippet(dirKey, num, numbers) : null;
+      if (snippet) {
+        snippet.className = 'clue-snippet';
+        wrap.appendChild(snippet);
+      }
       const label = document.createElement('span');
       label.textContent = num;
       row.appendChild(label);

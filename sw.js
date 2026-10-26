@@ -1,7 +1,7 @@
-const CACHE_NAME = 'xwordsnap-v32'; // bump on every deploy (same rule as the solver)
+const CACHE_NAME = 'xwordsnap-v37'; // bump on every deploy (same rule as the solver)
 const ASSETS = [
   './', './index.html', './manifest.json', './css/app.css',
-  './js/app.js', './js/detect.js', './js/puzzle.js', './js/clues.js',
+  './js/app.js', './js/detect.js', './js/puzzle.js', './js/clues.js', './js/autoboxes.js',
   './lib/jscrossword_combined.js', './lib/opencv.js',
   './js/ocr.js', './lib/ort.wasm.min.js', './lib/ort-wasm-simd-threaded.mjs',
   './lib/ort-wasm-simd-threaded.wasm', './lib/ocr/det.onnx', './lib/ocr/rec.onnx', './lib/ocr/dict.txt',
